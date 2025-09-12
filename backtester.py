@@ -1,0 +1,294 @@
+import pandas as pd
+from datetime import datetime, timedelta
+from models import Database
+from signal_detector import SignalDetector
+from utils import (
+    calculate_tp_sl_prices, 
+    check_tp_sl_hit, 
+    calculate_pnl, 
+    parse_datetime,
+    save_results_to_csv,
+    calculate_win_rate,
+    print_backtest_summary
+)
+from config import TIMEFRAME
+from logger import setup_logger
+
+logger = setup_logger()
+
+class Backtester:
+    def __init__(self):
+        self.db = Database()
+        self.signal_detector = SignalDetector()
+        self.active_orders = []  # Store active orders in memory
+        self.completed_orders = []  # Store completed orders for results
+        logger.info("Backtester initialized")
+
+    def run_backtest(self, start_date, end_date):
+        """
+        Run backtest from start_date to end_date
+        
+        Args:
+            start_date: str or datetime - Backtest start date
+            end_date: str or datetime - Backtest end date
+            
+        Returns:
+            list: Backtest results
+        """
+        try:
+            start_dt = parse_datetime(start_date) if isinstance(start_date, str) else start_date
+            end_dt = parse_datetime(end_date) if isinstance(end_date, str) else end_date
+            
+            logger.info(f"Starting backtest from {start_dt} to {end_dt}")
+            
+            # Load historical data from database
+            df = self.db.load_candles(start_dt, end_dt)
+            
+            if df.empty:
+                logger.error("No historical data found for backtest period")
+                return []
+            
+            logger.info(f"Loaded {len(df)} candles for backtest")
+            
+            # Reset state
+            self.active_orders = []
+            self.completed_orders = []
+            
+            # Sort data by timestamp ASC for chronological processing
+            df = df.sort_values('timestamp').reset_index(drop=True)
+            
+            # Start backtesting loop from index 3 (need 3 lookback candles)
+            current_index = 3
+            
+            while current_index < len(df):
+                current_time = df.iloc[current_index]['timestamp']
+                current_candle = df.iloc[current_index].to_dict()
+                
+                logger.debug(f"Processing candle at {current_time}")
+                
+                # Step 1: Check existing orders for TP/SL hits
+                self._check_active_orders(current_candle)
+                
+                # Step 2: Look for new signals at this time
+                # Get the lookback candles (N1, N2, N3)
+                if current_index >= 3:
+                    n1 = df.iloc[current_index - 3].to_dict()  # lookback 3
+                    n2 = df.iloc[current_index - 2].to_dict()  # lookback 2  
+                    n3 = df.iloc[current_index - 1].to_dict()  # lookback 1
+                    
+                    signal = self.signal_detector.detect_signal(n1, n2, n3)
+                    
+                    if signal:
+                        self._place_order(signal, current_time)
+                
+                current_index += 1
+            
+            # Process any remaining active orders at the end
+            self._close_remaining_orders(df.iloc[-1].to_dict())
+            
+            logger.info(f"Backtest completed. Total trades: {len(self.completed_orders)}")
+            
+            return self.completed_orders
+            
+        except Exception as e:
+            logger.error(f"Error during backtest: {e}")
+            return []
+
+    def _check_active_orders(self, current_candle):
+        """
+        Check active orders against current candle for TP/SL hits
+        
+        Args:
+            current_candle: dict - Current candle data
+        """
+        orders_to_remove = []
+        
+        for order in self.active_orders:
+            hit_type, exit_price = check_tp_sl_hit(
+                current_candle, 
+                order['tp_price'], 
+                order['sl_price'], 
+                order['signal_type']
+            )
+            
+            if hit_type:
+                # Order hit TP or SL
+                exit_time = current_candle['timestamp']
+                pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+                result = 'WIN' if hit_type == 'TP' else 'LOSS'
+                
+                # Create completed order record
+                completed_order = {
+                    'entry_time': order['entry_time'],
+                    'exit_time': exit_time,
+                    'signal_type': order['signal_type'],
+                    'condition': order['condition'],
+                    'entry_price': order['entry_price'],
+                    'exit_price': exit_price,
+                    'tp_price': order['tp_price'],
+                    'sl_price': order['sl_price'],
+                    'hit_type': hit_type,
+                    'pnl': pnl,
+                    'result': result,
+                    'duration_minutes': int((exit_time - order['entry_time']).total_seconds() / 60)
+                }
+                
+                self.completed_orders.append(completed_order)
+                orders_to_remove.append(order)
+                
+                logger.info(f"{result} trade: {order['signal_type']} from {order['entry_time']} "
+                           f"hit {hit_type} at {exit_time}, PnL: ${pnl:.4f}")
+        
+        # Remove completed orders from active list
+        for order in orders_to_remove:
+            self.active_orders.remove(order)
+
+    def _place_order(self, signal, current_time):
+        """
+        Place a new order based on detected signal
+        
+        Args:
+            signal: dict - Signal information
+            current_time: datetime - Current time for order placement
+        """
+        entry_price = signal['entry_price']
+        signal_type = signal['signal_type']
+        condition = signal['condition']
+        
+        # Calculate TP and SL prices
+        tp_price, sl_price = calculate_tp_sl_prices(entry_price, signal_type)
+        
+        # Create order
+        order = {
+            'entry_time': current_time,
+            'signal_type': signal_type,
+            'condition': condition,
+            'entry_price': entry_price,
+            'tp_price': tp_price,
+            'sl_price': sl_price,
+            'signal_details': signal['details']
+        }
+        
+        self.active_orders.append(order)
+        
+        logger.info(f"Placed {signal_type} order at {current_time}: "
+                   f"Entry=${entry_price:.4f}, TP=${tp_price:.4f}, SL=${sl_price:.4f}")
+
+    def _close_remaining_orders(self, last_candle):
+        """
+        Close any remaining active orders at the end of backtest
+        
+        Args:
+            last_candle: dict - Last candle data
+        """
+        for order in self.active_orders:
+            exit_price = last_candle['close']
+            exit_time = last_candle['timestamp']
+            pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+            
+            # Determine if it would have been a win or loss based on exit price
+            if order['signal_type'] == 'LONG':
+                result = 'WIN' if exit_price >= order['tp_price'] else 'LOSS'
+            else:  # SHORT
+                result = 'WIN' if exit_price <= order['tp_price'] else 'LOSS'
+            
+            completed_order = {
+                'entry_time': order['entry_time'],
+                'exit_time': exit_time,
+                'signal_type': order['signal_type'],
+                'condition': order['condition'],
+                'entry_price': order['entry_price'],
+                'exit_price': exit_price,
+                'tp_price': order['tp_price'],
+                'sl_price': order['sl_price'],
+                'hit_type': 'TIMEOUT',
+                'pnl': pnl,
+                'result': result,
+                'duration_minutes': int((exit_time - order['entry_time']).total_seconds() / 60)
+            }
+            
+            self.completed_orders.append(completed_order)
+            
+            logger.info(f"Closed remaining {order['signal_type']} order at backtest end: "
+                       f"Entry=${order['entry_price']:.4f}, Exit=${exit_price:.4f}, PnL=${pnl:.4f}")
+        
+        self.active_orders.clear()
+
+    def export_results(self, results, filename_prefix="backtest_results"):
+        """
+        Export backtest results to CSV
+        
+        Args:
+            results: list - Backtest results
+            filename_prefix: str - Filename prefix
+            
+        Returns:
+            str: Path to exported file
+        """
+        if not results:
+            logger.warning("No results to export")
+            return None
+        
+        filepath = save_results_to_csv(results, filename_prefix)
+        logger.info(f"Results exported to {filepath}")
+        return filepath
+
+    def analyze_results(self, results):
+        """
+        Analyze and print backtest results
+        
+        Args:
+            results: list - Backtest results
+            
+        Returns:
+            dict: Analysis statistics
+        """
+        if not results:
+            logger.warning("No results to analyze")
+            return {}
+        
+        stats = calculate_win_rate(results)
+        
+        # Additional analysis
+        long_trades = [r for r in results if r['signal_type'] == 'LONG']
+        short_trades = [r for r in results if r['signal_type'] == 'SHORT']
+        
+        engulfing_trades = [r for r in results if r['condition'] == 'ENGULFING']
+        inside_bar_trades = [r for r in results if r['condition'] == 'INSIDE_BAR']
+        
+        detailed_stats = {
+            **stats,
+            'long_trades': len(long_trades),
+            'short_trades': len(short_trades),
+            'long_wins': sum(1 for r in long_trades if r['result'] == 'WIN'),
+            'short_wins': sum(1 for r in short_trades if r['result'] == 'WIN'),
+            'long_win_rate': (sum(1 for r in long_trades if r['result'] == 'WIN') / len(long_trades)) * 100 if long_trades else 0,
+            'short_win_rate': (sum(1 for r in short_trades if r['result'] == 'WIN') / len(short_trades)) * 100 if short_trades else 0,
+            'engulfing_trades': len(engulfing_trades),
+            'inside_bar_trades': len(inside_bar_trades),
+            'engulfing_wins': sum(1 for r in engulfing_trades if r['result'] == 'WIN'),
+            'inside_bar_wins': sum(1 for r in inside_bar_trades if r['result'] == 'WIN'),
+            'engulfing_win_rate': (sum(1 for r in engulfing_trades if r['result'] == 'WIN') / len(engulfing_trades)) * 100 if engulfing_trades else 0,
+            'inside_bar_win_rate': (sum(1 for r in inside_bar_trades if r['result'] == 'WIN') / len(inside_bar_trades)) * 100 if inside_bar_trades else 0,
+            'avg_duration_minutes': sum(r['duration_minutes'] for r in results) / len(results) if results else 0
+        }
+        
+        # Print detailed analysis
+        print_backtest_summary(results)
+        print("\nDETAILED ANALYSIS:")
+        print(f"LONG Trades: {detailed_stats['long_trades']} (Win Rate: {detailed_stats['long_win_rate']:.2f}%)")
+        print(f"SHORT Trades: {detailed_stats['short_trades']} (Win Rate: {detailed_stats['short_win_rate']:.2f}%)")
+        print(f"Engulfing Pattern: {detailed_stats['engulfing_trades']} (Win Rate: {detailed_stats['engulfing_win_rate']:.2f}%)")
+        print(f"Inside Bar Pattern: {detailed_stats['inside_bar_trades']} (Win Rate: {detailed_stats['inside_bar_win_rate']:.2f}%)")
+        print(f"Average Trade Duration: {detailed_stats['avg_duration_minutes']:.1f} minutes")
+        
+        return detailed_stats
+
+    def get_active_orders_count(self):
+        """Get count of currently active orders"""
+        return len(self.active_orders)
+
+    def close(self):
+        """Close database connection"""
+        self.db.close()
+        logger.info("Backtester closed")
