@@ -45,3 +45,6 @@ TIMEOUT_HOURS = int(os.getenv("TIMEOUT_HOURS", 24))  # Maximum hours before orde
 ENABLE_TIME_WINDOW = os.getenv("ENABLE_TIME_WINDOW", "false").lower() == "true"  # Enable/disable trading time window
 TRADE_START_TIME = os.getenv("TRADE_START_TIME", "16:00")  # Trading start time (HH:MM format)
 TRADE_END_TIME = os.getenv("TRADE_END_TIME", "23:00")  # Trading end time (HH:MM format)
+
+# Single Order Mode Configuration
+ENABLE_SINGLE_ORDER_MODE = os.getenv("ENABLE_SINGLE_ORDER_MODE", "false").lower() == "true"  # Enable single order at a time mode

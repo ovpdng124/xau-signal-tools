@@ -13,7 +13,7 @@ from utils import (
     print_backtest_summary,
     is_within_trading_hours
 )
-from config import TIMEFRAME, ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME
+from config import TIMEFRAME, ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME, ENABLE_SINGLE_ORDER_MODE
 from logger import setup_logger
 
 logger = setup_logger()
@@ -25,10 +25,17 @@ class Backtester:
         self.active_orders = []  # Store active orders in memory
         self.completed_orders = []  # Store completed orders for results
         
+        # Log configuration
+        config_info = []
         if ENABLE_TIME_WINDOW:
-            logger.info(f"Backtester initialized with trading time window: {TRADE_START_TIME}-{TRADE_END_TIME}")
+            config_info.append(f"time window: {TRADE_START_TIME}-{TRADE_END_TIME}")
+        if ENABLE_SINGLE_ORDER_MODE:
+            config_info.append("single order mode")
+        
+        if config_info:
+            logger.info(f"Backtester initialized with {', '.join(config_info)}")
         else:
-            logger.info("Backtester initialized (trading time window disabled)")
+            logger.info("Backtester initialized (default mode: multiple orders, no time restrictions)")
         
 
     def run_backtest(self, start_date, end_date):
@@ -73,10 +80,7 @@ class Backtester:
                 
                 logger.debug(f"Processing candle at {current_time}")
                 
-                # Step 1: Check existing orders for TP/SL hits and timeouts
-                self._check_active_orders(current_candle)
-                
-                # Step 2: Look for new signals at this time
+                # Step 1: Look for new signals at this time BEFORE checking/closing orders
                 # Get the lookback candles (N1, N2, N3)
                 if current_index >= 3:
                     n1 = df.iloc[current_index - 3].to_dict()  # lookback 3
@@ -86,14 +90,21 @@ class Backtester:
                     signal = self.signal_detector.detect_signal(n1, n2, n3)
                     
                     if signal:
-                        # Check if within trading time window (if enabled)
-                        if ENABLE_TIME_WINDOW:
-                            if is_within_trading_hours(current_time, TRADE_START_TIME, TRADE_END_TIME):
-                                self._place_order(signal, current_time)
-                            else:
-                                logger.debug(f"Signal ignored outside trading hours: {current_time.strftime('%H:%M')} (Trading window: {TRADE_START_TIME}-{TRADE_END_TIME})")
+                        # Check single order mode first (if enabled)
+                        if ENABLE_SINGLE_ORDER_MODE and len(self.active_orders) > 0:
+                            logger.info(f"Signal ignored due to single order mode: {len(self.active_orders)} active order(s) at {current_time.strftime('%Y-%m-%d %H:%M')}")
                         else:
-                            self._place_order(signal, current_time)
+                            # Check if within trading time window (if enabled)
+                            if ENABLE_TIME_WINDOW:
+                                if is_within_trading_hours(current_time, TRADE_START_TIME, TRADE_END_TIME):
+                                    self._place_order(signal, current_time)
+                                else:
+                                    logger.debug(f"Signal ignored outside trading hours: {current_time.strftime('%H:%M')} (Trading window: {TRADE_START_TIME}-{TRADE_END_TIME})")
+                            else:
+                                self._place_order(signal, current_time)
+                
+                # Step 2: Check existing orders for TP/SL hits and timeouts
+                self._check_active_orders(current_candle)
                 
                 current_index += 1
             
