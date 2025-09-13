@@ -40,3 +40,8 @@ MAX_POINTS_PER_REQUEST = 5000  # Maximum data points per request
 # Backtest Configuration
 ENABLE_TIMEOUT = os.getenv("ENABLE_TIMEOUT", "true").lower() == "true"  # Enable/disable order timeout at backtest end
 TIMEOUT_HOURS = int(os.getenv("TIMEOUT_HOURS", 24))  # Maximum hours before order timeout (0 = disable time-based timeout)
+
+# Trading Time Window Configuration
+ENABLE_TIME_WINDOW = os.getenv("ENABLE_TIME_WINDOW", "false").lower() == "true"  # Enable/disable trading time window
+TRADE_START_TIME = os.getenv("TRADE_START_TIME", "16:00")  # Trading start time (HH:MM format)
+TRADE_END_TIME = os.getenv("TRADE_END_TIME", "23:00")  # Trading end time (HH:MM format)

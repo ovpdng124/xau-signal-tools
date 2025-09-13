@@ -10,9 +10,10 @@ from utils import (
     parse_datetime,
     save_results_to_csv,
     calculate_win_rate,
-    print_backtest_summary
+    print_backtest_summary,
+    is_within_trading_hours
 )
-from config import TIMEFRAME, ENABLE_TIMEOUT, TIMEOUT_HOURS
+from config import TIMEFRAME, ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME
 from logger import setup_logger
 
 logger = setup_logger()
@@ -23,7 +24,12 @@ class Backtester:
         self.signal_detector = SignalDetector()
         self.active_orders = []  # Store active orders in memory
         self.completed_orders = []  # Store completed orders for results
-        logger.info("Backtester initialized")
+        
+        if ENABLE_TIME_WINDOW:
+            logger.info(f"Backtester initialized with trading time window: {TRADE_START_TIME}-{TRADE_END_TIME}")
+        else:
+            logger.info("Backtester initialized (trading time window disabled)")
+        
 
     def run_backtest(self, start_date, end_date):
         """
@@ -80,7 +86,14 @@ class Backtester:
                     signal = self.signal_detector.detect_signal(n1, n2, n3)
                     
                     if signal:
-                        self._place_order(signal, current_time)
+                        # Check if within trading time window (if enabled)
+                        if ENABLE_TIME_WINDOW:
+                            if is_within_trading_hours(current_time, TRADE_START_TIME, TRADE_END_TIME):
+                                self._place_order(signal, current_time)
+                            else:
+                                logger.debug(f"Signal ignored outside trading hours: {current_time.strftime('%H:%M')} (Trading window: {TRADE_START_TIME}-{TRADE_END_TIME})")
+                        else:
+                            self._place_order(signal, current_time)
                 
                 current_index += 1
             

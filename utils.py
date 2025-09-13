@@ -115,6 +115,44 @@ def get_candle_amplitude_percentage(candle):
     """
     return ((candle['high'] - candle['low']) / candle['low']) * 100
 
+def is_within_trading_hours(timestamp, start_time_str, end_time_str):
+    """
+    Check if timestamp is within trading hours
+    
+    Args:
+        timestamp: datetime - Time to check
+        start_time_str: str - Start time in HH:MM format
+        end_time_str: str - End time in HH:MM format
+    
+    Returns:
+        bool: True if within trading hours, False otherwise
+    """
+    try:
+        # Parse time strings
+        start_hour, start_min = map(int, start_time_str.split(':'))
+        end_hour, end_min = map(int, end_time_str.split(':'))
+        
+        # Get timestamp hour and minute
+        current_hour = timestamp.hour
+        current_min = timestamp.minute
+        
+        # Convert to minutes for easier comparison
+        start_minutes = start_hour * 60 + start_min
+        end_minutes = end_hour * 60 + end_min
+        current_minutes = current_hour * 60 + current_min
+        
+        # Handle case where trading window crosses midnight
+        if end_minutes < start_minutes:
+            # Window crosses midnight (e.g., 23:00 to 02:00)
+            return current_minutes >= start_minutes or current_minutes <= end_minutes
+        else:
+            # Normal window (e.g., 16:00 to 23:00)
+            return start_minutes <= current_minutes <= end_minutes
+            
+    except (ValueError, AttributeError) as e:
+        # If there's an error parsing time, default to allowing trade
+        return True
+
 def format_datetime(dt):
     """Format datetime to string"""
     if isinstance(dt, str):
