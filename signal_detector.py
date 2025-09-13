@@ -1,6 +1,6 @@
 import pandas as pd
 from datetime import datetime
-from utils import is_green_candle, is_red_candle, get_candle_body_range
+from utils import is_green_candle, is_red_candle, get_candle_body_range, get_candle_amplitude_percentage
 from logger import setup_logger
 
 logger = setup_logger()
@@ -12,19 +12,26 @@ class SignalDetector:
     def detect_signal(self, n1, n2, n3):
         """
         Detect trading signals based on two conditions:
-        1. Engulfing candle pattern
-        2. Inside bar pattern
+        1. Engulfing candle pattern (uses N2, N3 as lookback 2, 1)
+        2. Inside bar pattern (uses N1, N2, N3 as lookback 3, 2, 1)
+        
+        Prerequisites:
+        - All 3 candles must have amplitude > 0.02%
+        - Amplitude difference between candles must be > 0.01%
         
         Args:
             n1: dict - Candle 1 (lookback 3)
             n2: dict - Candle 2 (lookback 2) 
-            n3: dict - Candle 3 (lookback 1)
+            n3: dict - Candle 3 (lookback 1) - Entry candle
         
         Returns:
             dict: Signal information or None if no signal
         """
-        # Check Condition 1: Engulfing pattern
-        engulfing_signal = self._check_engulfing_pattern(n1, n2)
+        # Check prerequisite conditions first
+        if not self._check_prerequisite_conditions(n1, n2, n3):
+            return None
+        # Check Condition 1: Engulfing pattern (N2 vs N3, entry at N3)
+        engulfing_signal = self._check_engulfing_pattern(n2, n3)
         if engulfing_signal:
             return {
                 'signal_type': engulfing_signal,
@@ -32,13 +39,13 @@ class SignalDetector:
                 'entry_price': n3['close'],  # Entry at N3 close price
                 'timestamp': n3['timestamp'],
                 'details': {
-                    'n1': self._candle_info(n1),
-                    'n2': self._candle_info(n2),
-                    'n3': self._candle_info(n3)
+                    'engulfing_n1': self._candle_info(n2),  # N2 is N1 for engulfing
+                    'engulfing_n2': self._candle_info(n3),  # N3 is N2 for engulfing
+                    'entry_candle': self._candle_info(n3)
                 }
             }
         
-        # Check Condition 2: Inside bar pattern
+        # Check Condition 2: Inside bar pattern (N1, N2, N3, entry at N3)
         inside_bar_signal = self._check_inside_bar_pattern(n1, n2, n3)
         if inside_bar_signal:
             return {
@@ -47,25 +54,63 @@ class SignalDetector:
                 'entry_price': n3['close'],  # Entry at N3 close price
                 'timestamp': n3['timestamp'],
                 'details': {
-                    'n1': self._candle_info(n1),
-                    'n2': self._candle_info(n2),
-                    'n3': self._candle_info(n3)
+                    'inside_n1': self._candle_info(n1),  # N1 for inside bar
+                    'inside_n2': self._candle_info(n2),  # N2 for inside bar
+                    'inside_n3': self._candle_info(n3),  # N3 for inside bar (entry)
                 }
             }
         
         return None
 
-    def _check_engulfing_pattern(self, n1, n2):
+    def _check_prerequisite_conditions(self, n1, n2, n3):
         """
-        Check for engulfing candle pattern
+        Check prerequisite conditions before pattern detection
         
-        Condition 1:
-        - SHORT: N1 green AND N2 red AND open_N1 > close_N2
-        - LONG: N1 red AND N2 green AND open_N1 > close_N2
+        Conditions:
+        - All 3 candles must have amplitude > 0.02%
+        - Amplitude difference between candles must be > 0.01%
         
         Args:
             n1: dict - Candle 1
-            n2: dict - Candle 2
+            n2: dict - Candle 2 
+            n3: dict - Candle 3
+        
+        Returns:
+            bool: True if prerequisites are met, False otherwise
+        """
+        # Calculate amplitude percentages for all 3 candles
+        amp1 = get_candle_amplitude_percentage(n1)
+        amp2 = get_candle_amplitude_percentage(n2)
+        amp3 = get_candle_amplitude_percentage(n3)
+        
+        # Check if all amplitudes are > 0.02%
+        if amp1 <= 0.02 or amp2 <= 0.02 or amp3 <= 0.02:
+            logger.debug(f"Amplitude check failed: N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}% (all must be > 0.02%)")
+            return False
+        
+        # Check amplitude differences > 0.01%
+        diff_12 = abs(amp1 - amp2)
+        diff_23 = abs(amp2 - amp3)
+        diff_13 = abs(amp1 - amp3)
+        
+        if diff_12 <= 0.01 or diff_23 <= 0.01 or diff_13 <= 0.01:
+            logger.debug(f"Amplitude difference check failed: diff_12={diff_12:.4f}%, diff_23={diff_23:.4f}%, diff_13={diff_13:.4f}% (all must be > 0.01%)")
+            return False
+        
+        logger.debug(f"Prerequisites passed: Amplitudes N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}%")
+        return True
+
+    def _check_engulfing_pattern(self, n1, n2):
+        """
+        Check for engulfing candle pattern (2-candle lookback)
+        
+        Condition 1:
+        - SHORT: N1 green AND N2 red AND open_N1 > close_N2
+        - LONG: N1 red AND N2 green AND open_N1 < close_N2
+        
+        Args:
+            n1: dict - Candle 1 (lookback 2)
+            n2: dict - Candle 2 (lookback 1, entry candle)
             
         Returns:
             str: 'LONG', 'SHORT' or None
@@ -78,34 +123,30 @@ class SignalDetector:
         open_n1 = n1['open']
         close_n2 = n2['close']
         
-        # Both conditions require open_N1 > close_N2
-        if open_n1 <= close_n2:
-            return None
-        
         # SHORT: N1 green AND N2 red AND open_N1 > close_N2
-        if n1_green and n2_red:
+        if n1_green and n2_red and open_n1 > close_n2:
             logger.debug(f"Engulfing SHORT signal detected: N1 green, N2 red, open_N1({open_n1}) > close_N2({close_n2})")
             return 'SHORT'
         
-        # LONG: N1 red AND N2 green AND open_N1 > close_N2  
-        if n1_red and n2_green:
-            logger.debug(f"Engulfing LONG signal detected: N1 red, N2 green, open_N1({open_n1}) > close_N2({close_n2})")
+        # LONG: N1 red AND N2 green AND open_N1 < close_N2  
+        if n1_red and n2_green and open_n1 < close_n2:
+            logger.debug(f"Engulfing LONG signal detected: N1 red, N2 green, open_N1({open_n1}) < close_N2({close_n2})")
             return 'LONG'
         
         return None
 
     def _check_inside_bar_pattern(self, n1, n2, n3):
         """
-        Check for inside bar pattern
+        Check for inside bar pattern (3-candle lookback)
         
         Condition 2:
-        - SHORT: N1 green AND N2 red AND N3 red AND N1_body_range < (N2+N3)_combined_range
-        - LONG: N1 red AND N2 green AND N3 green AND N1_body_range < (N2+N3)_combined_range
+        - SHORT: N1 green AND N2 red AND N3 red AND N1_body_range < (N2+N3)_combined_range AND N2_body_range < N1_body_range
+        - LONG: N1 red AND N2 green AND N3 green AND N1_body_range < (N2+N3)_combined_range AND N2_body_range < N1_body_range
         
         Args:
-            n1: dict - Candle 1
-            n2: dict - Candle 2
-            n3: dict - Candle 3
+            n1: dict - Candle 1 (lookback 3)
+            n2: dict - Candle 2 (lookback 2)
+            n3: dict - Candle 3 (lookback 1, entry candle)
             
         Returns:
             str: 'LONG', 'SHORT' or None
@@ -117,8 +158,13 @@ class SignalDetector:
         n3_green = is_green_candle(n3)
         n3_red = is_red_candle(n3)
         
-        # Calculate N1 body range
+        # Calculate N1 and N2 body ranges
         n1_body_range = get_candle_body_range(n1)
+        n2_body_range = get_candle_body_range(n2)
+        
+        # Additional condition: N2 body range must be smaller than N1 body range
+        if n2_body_range >= n1_body_range:
+            return None
         
         # Calculate combined N2+N3 range based on their colors
         if n2_red and n3_red:
@@ -137,12 +183,12 @@ class SignalDetector:
         
         # SHORT: N1 green AND N2 red AND N3 red
         if n1_green and n2_red and n3_red:
-            logger.debug(f"Inside bar SHORT signal: N1 green, N2&N3 red, N1_range({n1_body_range:.5f}) < combined({combined_range:.5f})")
+            logger.debug(f"Inside bar SHORT signal: N1 green, N2&N3 red, N1_range({n1_body_range:.5f}) < combined({combined_range:.5f}), N2_range({n2_body_range:.5f}) < N1_range({n1_body_range:.5f})")
             return 'SHORT'
         
         # LONG: N1 red AND N2 green AND N3 green
         if n1_red and n2_green and n3_green:
-            logger.debug(f"Inside bar LONG signal: N1 red, N2&N3 green, N1_range({n1_body_range:.5f}) < combined({combined_range:.5f})")
+            logger.debug(f"Inside bar LONG signal: N1 red, N2&N3 green, N1_range({n1_body_range:.5f}) < combined({combined_range:.5f}), N2_range({n2_body_range:.5f}) < N1_range({n1_body_range:.5f})")
             return 'LONG'
         
         return None

@@ -26,8 +26,8 @@ def calculate_tp_sl_prices(entry_price, signal_type):
     Returns:
         tuple: (tp_price, sl_price)
     """
-    tp_amount = TP_AMOUNT / 1000  # Convert to proper decimal (6.0 -> 0.006)
-    sl_amount = SL_AMOUNT / 1000  # Convert to proper decimal (3.0 -> 0.003)
+    tp_amount = TP_AMOUNT  # Convert to proper decimal (6.0 -> 0.006)
+    sl_amount = SL_AMOUNT  # Convert to proper decimal (3.0 -> 0.003)
     
     if signal_type == 'LONG':
         tp_price = entry_price + tp_amount
@@ -85,6 +85,35 @@ def calculate_pnl(entry_price, exit_price, signal_type):
         return exit_price - entry_price
     else:  # SHORT
         return entry_price - exit_price
+
+def calculate_pnl_percentage(entry_price, exit_price, signal_type):
+    """
+    Calculate PnL as percentage
+    
+    Args:
+        entry_price: float
+        exit_price: float
+        signal_type: str - 'LONG' or 'SHORT'
+    
+    Returns:
+        float: PnL as percentage
+    """
+    if signal_type == 'LONG':
+        return ((exit_price - entry_price) / entry_price) * 100
+    else:  # SHORT
+        return ((entry_price - exit_price) / entry_price) * 100
+
+def get_candle_amplitude_percentage(candle):
+    """
+    Calculate candle amplitude as percentage
+    
+    Args:
+        candle: dict - Candle data with high and low
+    
+    Returns:
+        float: Amplitude as percentage (high-low)/low * 100
+    """
+    return ((candle['high'] - candle['low']) / candle['low']) * 100
 
 def format_datetime(dt):
     """Format datetime to string"""
@@ -149,6 +178,7 @@ def calculate_win_rate(results):
             'losses': 0,
             'win_rate': 0.0,
             'total_pnl': 0.0,
+            'total_pnl_percentage': 0.0,
             'avg_win': 0.0,
             'avg_loss': 0.0
         }
@@ -159,6 +189,9 @@ def calculate_win_rate(results):
     win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0.0
     
     total_pnl = sum(r['pnl'] for r in results)
+    
+    # Calculate total %PNL as sum of all individual pnl_percentage
+    total_pnl_percentage = sum(r.get('pnl_percentage', 0.0) for r in results)
     
     win_pnls = [r['pnl'] for r in results if r['result'] == 'WIN']
     loss_pnls = [r['pnl'] for r in results if r['result'] == 'LOSS']
@@ -172,6 +205,7 @@ def calculate_win_rate(results):
         'losses': losses,
         'win_rate': win_rate,
         'total_pnl': total_pnl,
+        'total_pnl_percentage': total_pnl_percentage,
         'avg_win': avg_win,
         'avg_loss': avg_loss
     }
@@ -188,6 +222,7 @@ def print_backtest_summary(results):
     print(f"Losses: {stats['losses']}")
     print(f"Win Rate: {stats['win_rate']:.2f}%")
     print(f"Total PnL: ${stats['total_pnl']:.4f}")
+    print(f"Total PnL%: {stats['total_pnl_percentage']:.4f}%")
     print(f"Average Win: ${stats['avg_win']:.4f}")
     print(f"Average Loss: ${stats['avg_loss']:.4f}")
     print("="*50)

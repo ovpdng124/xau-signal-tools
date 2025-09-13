@@ -92,16 +92,21 @@ class Database:
 
     def load_candles(self, start_time=None, end_time=None):
         try:
-            query = "SELECT * FROM candles"
-            params = {}
-            
             if start_time and end_time:
-                query += " WHERE timestamp >= :start_time AND timestamp <= :end_time"
-                params = {"start_time": start_time, "end_time": end_time}
-            
-            query += " ORDER BY timestamp ASC"
-            
-            df = pd.read_sql(query, self.engine, params=params)
+                # Use SQLAlchemy text with bound parameters
+                query = text("""
+                    SELECT * FROM candles 
+                    WHERE timestamp >= :start_time AND timestamp <= :end_time 
+                    ORDER BY timestamp ASC
+                """)
+                df = pd.read_sql(query, self.engine, params={
+                    "start_time": start_time, 
+                    "end_time": end_time
+                })
+            else:
+                # Simple query without parameters
+                query = "SELECT * FROM candles ORDER BY timestamp ASC"
+                df = pd.read_sql(query, self.engine)
             
             if not df.empty:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])

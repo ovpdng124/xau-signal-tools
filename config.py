@@ -36,3 +36,7 @@ SYMBOL = os.getenv("SYMBOL", "XAU/USD")  # Gold/USD symbol for Twelve Data time_
 API_RATE_LIMIT_PER_MINUTE = 8
 API_RATE_LIMIT_PER_DAY = 800
 MAX_POINTS_PER_REQUEST = 5000  # Maximum data points per request
+
+# Backtest Configuration
+ENABLE_TIMEOUT = os.getenv("ENABLE_TIMEOUT", "true").lower() == "true"  # Enable/disable order timeout at backtest end
+TIMEOUT_HOURS = int(os.getenv("TIMEOUT_HOURS", 24))  # Maximum hours before order timeout (0 = disable time-based timeout)

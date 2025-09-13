@@ -5,13 +5,14 @@ from signal_detector import SignalDetector
 from utils import (
     calculate_tp_sl_prices, 
     check_tp_sl_hit, 
-    calculate_pnl, 
+    calculate_pnl,
+    calculate_pnl_percentage,
     parse_datetime,
     save_results_to_csv,
     calculate_win_rate,
     print_backtest_summary
 )
-from config import TIMEFRAME
+from config import TIMEFRAME, ENABLE_TIMEOUT, TIMEOUT_HOURS
 from logger import setup_logger
 
 logger = setup_logger()
@@ -66,7 +67,7 @@ class Backtester:
                 
                 logger.debug(f"Processing candle at {current_time}")
                 
-                # Step 1: Check existing orders for TP/SL hits
+                # Step 1: Check existing orders for TP/SL hits and timeouts
                 self._check_active_orders(current_candle)
                 
                 # Step 2: Look for new signals at this time
@@ -83,8 +84,9 @@ class Backtester:
                 
                 current_index += 1
             
-            # Process any remaining active orders at the end
-            self._close_remaining_orders(df.iloc[-1].to_dict())
+            # Process any remaining active orders at the end (only if TIMEOUT enabled)
+            if ENABLE_TIMEOUT:
+                self._close_remaining_orders(df.iloc[-1].to_dict())
             
             logger.info(f"Backtest completed. Total trades: {len(self.completed_orders)}")
             
@@ -96,14 +98,54 @@ class Backtester:
 
     def _check_active_orders(self, current_candle):
         """
-        Check active orders against current candle for TP/SL hits
+        Check active orders against current candle for TP/SL hits and timeouts
         
         Args:
             current_candle: dict - Current candle data
         """
         orders_to_remove = []
+        current_time = current_candle['timestamp']
         
         for order in self.active_orders:
+            # Check for time-based timeout first (if enabled)
+            if TIMEOUT_HOURS > 0:
+                order_age_hours = (current_time - order['entry_time']).total_seconds() / 3600
+                if order_age_hours >= TIMEOUT_HOURS:
+                    # Order timed out
+                    exit_price = current_candle['close']
+                    pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+                    pnl_percentage = calculate_pnl_percentage(order['entry_price'], exit_price, order['signal_type'])
+                    
+                    # Determine if it would have been a win or loss based on exit price vs TP
+                    if order['signal_type'] == 'LONG':
+                        result = 'WIN' if exit_price >= order['tp_price'] else 'LOSS'
+                    else:  # SHORT
+                        result = 'WIN' if exit_price <= order['tp_price'] else 'LOSS'
+                    
+                    completed_order = {
+                        'entry_time': order['entry_time'],
+                        'exit_time': current_time,
+                        'signal_type': order['signal_type'],
+                        'condition': order['condition'],
+                        'entry_price': order['entry_price'],
+                        'exit_price': exit_price,
+                        'tp_price': order['tp_price'],
+                        'sl_price': order['sl_price'],
+                        'hit_type': 'TIMEOUT',
+                        'pnl': pnl,
+                        'pnl_percentage': pnl_percentage,
+                        'result': result,
+                        'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60)
+                    }
+                    
+                    self.completed_orders.append(completed_order)
+                    orders_to_remove.append(order)
+                    
+                    logger.info(f"TIMEOUT trade: {order['signal_type']} from {order['entry_time']} "
+                               f"timed out at {current_time} after {order_age_hours:.1f}h, PnL: ${pnl:.4f}")
+                    continue
+            
+            # Check for TP/SL hits
             hit_type, exit_price = check_tp_sl_hit(
                 current_candle, 
                 order['tp_price'], 
@@ -113,14 +155,14 @@ class Backtester:
             
             if hit_type:
                 # Order hit TP or SL
-                exit_time = current_candle['timestamp']
                 pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+                pnl_percentage = calculate_pnl_percentage(order['entry_price'], exit_price, order['signal_type'])
                 result = 'WIN' if hit_type == 'TP' else 'LOSS'
                 
                 # Create completed order record
                 completed_order = {
                     'entry_time': order['entry_time'],
-                    'exit_time': exit_time,
+                    'exit_time': current_time,
                     'signal_type': order['signal_type'],
                     'condition': order['condition'],
                     'entry_price': order['entry_price'],
@@ -129,15 +171,16 @@ class Backtester:
                     'sl_price': order['sl_price'],
                     'hit_type': hit_type,
                     'pnl': pnl,
+                    'pnl_percentage': pnl_percentage,
                     'result': result,
-                    'duration_minutes': int((exit_time - order['entry_time']).total_seconds() / 60)
+                    'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60)
                 }
                 
                 self.completed_orders.append(completed_order)
                 orders_to_remove.append(order)
                 
                 logger.info(f"{result} trade: {order['signal_type']} from {order['entry_time']} "
-                           f"hit {hit_type} at {exit_time}, PnL: ${pnl:.4f}")
+                           f"hit {hit_type} at {current_time}, PnL: ${pnl:.4f}")
         
         # Remove completed orders from active list
         for order in orders_to_remove:
@@ -185,6 +228,7 @@ class Backtester:
             exit_price = last_candle['close']
             exit_time = last_candle['timestamp']
             pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+            pnl_percentage = calculate_pnl_percentage(order['entry_price'], exit_price, order['signal_type'])
             
             # Determine if it would have been a win or loss based on exit price
             if order['signal_type'] == 'LONG':
@@ -203,6 +247,7 @@ class Backtester:
                 'sl_price': order['sl_price'],
                 'hit_type': 'TIMEOUT',
                 'pnl': pnl,
+                'pnl_percentage': pnl_percentage,
                 'result': result,
                 'duration_minutes': int((exit_time - order['entry_time']).total_seconds() / 60)
             }
