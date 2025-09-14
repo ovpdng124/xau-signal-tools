@@ -29,6 +29,9 @@ Examples:
   %(prog)s detect --start-date "2024-06-01 00:00:00" --end-date "2024-06-30 23:59:59"
   %(prog)s backtest --start-date "2024-01-01 00:00:00" --end-date "2024-12-31 23:59:59" --timeframe 15m
   %(prog)s backtest --timeframe 1h  # Backtest 1H data using config dates
+  %(prog)s daemon start  # Start continuous crawling daemon
+  %(prog)s daemon stop   # Stop daemon
+  %(prog)s daemon status # Check daemon status
   %(prog)s status  # Show system status
         """
     )
@@ -56,6 +59,14 @@ Examples:
     backtest_parser.add_argument('--end-date', type=str, help='Backtest end date')
     backtest_parser.add_argument('--timeframe', type=str, default=DEFAULT_TIMEFRAME, help=f'Timeframe for backtest data (1m, 5m, 15m, 30m, 1h, 4h, 1d). Default: {DEFAULT_TIMEFRAME}')
     backtest_parser.add_argument('--export', action='store_true', default=True, help='Export results to CSV (default: True)')
+    
+    # Daemon command
+    daemon_parser = subparsers.add_parser('daemon', help='Daemon mode for continuous crawling and signal detection')
+    daemon_subparsers = daemon_parser.add_subparsers(dest='daemon_action', help='Daemon actions')
+    daemon_subparsers.add_parser('start', help='Start daemon in background')
+    daemon_subparsers.add_parser('stop', help='Stop running daemon')
+    daemon_subparsers.add_parser('status', help='Check daemon status')
+    daemon_subparsers.add_parser('logs', help='View daemon logs in real-time')
     
     # Status command
     status_parser = subparsers.add_parser('status', help='Show database and system status')
@@ -349,6 +360,123 @@ def handle_reset_command(args):
         logger.error(f"Error in reset command: {e}")
         return False
 
+def handle_daemon_command(args):
+    """Handle daemon command"""
+    try:
+        from scheduler import DaemonScheduler
+        import json
+        import subprocess
+        import os
+        
+        daemon = DaemonScheduler()
+        
+        if args.daemon_action == 'start':
+            print("🚀 Starting XAU Signal Daemon...")
+            
+            # Check if already running
+            if daemon.is_running():
+                print("❌ Daemon is already running!")
+                print("Use 'python main.py daemon status' to check status")
+                print("Use 'python main.py daemon stop' to stop it first")
+                return False
+            
+            # Start daemon in background
+            success = daemon.start()
+            
+            if success:
+                print("✅ Daemon started successfully!")
+                print("Use 'python main.py daemon status' to monitor")
+                print("Use 'python main.py daemon logs' to view logs")
+            else:
+                print("❌ Failed to start daemon. Check logs for details.")
+            
+            return success
+            
+        elif args.daemon_action == 'stop':
+            print("🛑 Stopping XAU Signal Daemon...")
+            
+            if not daemon.is_running():
+                print("⚠️ Daemon is not running")
+                return True
+            
+            success = daemon.stop()
+            
+            if success:
+                print("✅ Daemon stopped successfully!")
+            else:
+                print("❌ Failed to stop daemon")
+            
+            return success
+            
+        elif args.daemon_action == 'status':
+            status = daemon.status()
+            
+            print("\n📊 XAU Signal Daemon Status")
+            print("=" * 40)
+            
+            if status['status'] == 'running':
+                print(f"Status: 🟢 {status['status'].upper()}")
+                print(f"PID: {status.get('pid', 'Unknown')}")
+                print(f"Uptime: {status.get('uptime', 'Unknown')}")
+                print(f"Last Activity: {status.get('message', 'Unknown')}")
+                
+                if 'config' in status:
+                    config = status['config']
+                    print(f"\nConfiguration:")
+                    print(f"  Crawl Interval: {config.get('crawl_interval_minutes', 'Unknown')} minutes")
+                    print(f"  Auto Detect: {'Enabled' if config.get('auto_detect_enabled') else 'Disabled'}")
+                    print(f"  Telegram: {'Enabled' if config.get('telegram_enabled') else 'Disabled'}")
+                    print(f"  Timeframe: {config.get('timeframe', 'Unknown')}")
+                
+            elif status['status'] == 'stopped':
+                print(f"Status: 🔴 {status['status'].upper()}")
+            else:
+                print(f"Status: ⚠️ {status['status'].upper()}")
+            
+            print(f"Message: {status.get('message', 'No message')}")
+            print(f"Last Check: {status.get('timestamp', 'Unknown')}")
+            
+            return True
+            
+        elif args.daemon_action == 'logs':
+            print("📋 XAU Signal Daemon Logs")
+            print("=" * 40)
+            print("Press Ctrl+C to exit log viewing\n")
+            
+            try:
+                # Try to read from log files
+                log_files = ['logs/xau_signal_tools.log']
+                
+                for log_file in log_files:
+                    if os.path.exists(log_file):
+                        print(f"Tailing {log_file}...")
+                        # Use subprocess to tail log file
+                        subprocess.run(['tail', '-f', log_file])
+                        break
+                else:
+                    print("No log files found. Daemon might not be running or logging is disabled.")
+                    
+            except KeyboardInterrupt:
+                print("\nLog viewing stopped.")
+            except Exception as e:
+                print(f"Error viewing logs: {e}")
+                return False
+            
+            return True
+            
+        else:
+            print(f"Unknown daemon action: {args.daemon_action}")
+            return False
+            
+    except ImportError as e:
+        logger.error(f"Failed to import scheduler module: {e}")
+        print("❌ Daemon functionality is not available")
+        return False
+    except Exception as e:
+        logger.error(f"Error in daemon command: {e}")
+        print(f"❌ Daemon command failed: {e}")
+        return False
+
 def main():
     """Main entry point"""
     try:
@@ -374,6 +502,8 @@ def main():
             success = handle_detect_command(args)
         elif args.command == 'backtest':
             success = handle_backtest_command(args)
+        elif args.command == 'daemon':
+            success = handle_daemon_command(args)
         elif args.command == 'status':
             success = handle_status_command(args)
         elif args.command == 'migrate':

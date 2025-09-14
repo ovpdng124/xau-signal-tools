@@ -53,3 +53,9 @@ ENABLE_SINGLE_ORDER_MODE = os.getenv("ENABLE_SINGLE_ORDER_MODE", "false").lower(
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")  # Telegram bot token
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Telegram chat ID for notifications
 ENABLE_TELEGRAM_NOTIFICATIONS = os.getenv("ENABLE_TELEGRAM_NOTIFICATIONS", "false").lower() == "true"  # Enable/disable Telegram notifications
+
+# Daemon Scheduler Configuration
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "false").lower() == "true"  # Enable/disable scheduler daemon
+CRAWL_INTERVAL_MINUTES = int(os.getenv("CRAWL_INTERVAL_MINUTES", 15))  # Crawl interval in minutes
+AUTO_DETECT_ENABLED = os.getenv("AUTO_DETECT_ENABLED", "true").lower() == "true"  # Auto-detect signals after crawl
+HEALTH_CHECK_INTERVAL_MINUTES = int(os.getenv("HEALTH_CHECK_INTERVAL_MINUTES", 60))  # Health check interval in minutes

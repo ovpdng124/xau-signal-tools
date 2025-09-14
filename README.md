@@ -10,6 +10,11 @@ Tool phân tích tín hiệu trading và backtesting cho thì trường vàng XA
   - Engulfing Pattern (Nến nhấn chìm)
   - Inside Bar Pattern
 - **Backtesting**: Mô phỏng trading với TP/SL chính xác đến phút (1m precision)
+- **Daemon Mode**: Chế độ chạy liên tục tự động crawl và phát hiện tín hiệu
+  - Auto-crawling mỗi 15 phút
+  - Auto-detect tín hiệu ngay lập tức
+  - Gửi thông báo Telegram khi có tín hiệu
+- **Telegram Notifications**: Thông báo tự động qua Telegram
 - **Database**: Lưu trữ dữ liệu đa timeframe trong PostgreSQL
 - **Export**: Xuất kết quả ra CSV và tạo MQL5 scripts cho MetaTrader5
 
@@ -155,6 +160,78 @@ python main.py backtest
 - Check TP/SL trên dữ liệu 1 phút để có độ chính xác cao hơn
 - Cần có cả dữ liệu timeframe chính và 1m trong database
 
+### 🤖 Daemon Mode - Chế độ tự động liên tục
+
+Daemon mode cho phép tool chạy liên tục trong background, tự động crawl data và phát hiện tín hiệu mới.
+
+#### Khởi động daemon
+```bash
+# Khởi động daemon (chạy background)
+python main.py daemon start
+```
+
+#### Kiểm tra trạng thái daemon
+```bash
+# Xem trạng thái chi tiết
+python main.py daemon status
+```
+
+Output sẽ hiển thị:
+```
+📊 XAU Signal Daemon Status
+========================================
+Status: 🟢 RUNNING
+PID: 12345
+Uptime: 02:30:15
+Last Activity: 14:45:23
+
+Configuration:
+  Crawl Interval: 15 minutes
+  Auto Detect: Enabled
+  Telegram: Enabled
+  Timeframe: 15m
+```
+
+#### Xem logs real-time
+```bash
+# Xem logs daemon (nhấn Ctrl+C để thoát)
+python main.py daemon logs
+```
+
+#### Dừng daemon
+```bash
+# Dừng daemon
+python main.py daemon stop
+```
+
+#### Cấu hình Daemon (trong file .env)
+```bash
+# Daemon Scheduler Configuration
+SCHEDULER_ENABLED=true              # Bật/tắt scheduler daemon
+CRAWL_INTERVAL_MINUTES=15          # Khoảng cách giữa các lần crawl (phút)
+AUTO_DETECT_ENABLED=true           # Tự động detect signal sau khi crawl
+HEALTH_CHECK_INTERVAL_MINUTES=60   # Khoảng cách health check (phút)
+
+# Telegram Configuration (cần thiết cho daemon)
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+ENABLE_TELEGRAM_NOTIFICATIONS=true
+```
+
+#### Workflow của Daemon
+Mỗi 15 phút, daemon sẽ:
+1. **Crawl data mới** từ MetaTrader5 (incremental)
+2. **Auto-detect signals** trên data vừa crawl
+3. **Gửi thông báo Telegram** nếu tìm thấy tín hiệu mới
+4. **Log hoạt động** và cập nhật statistics
+5. **Health check** mỗi 60 phút
+
+**Lưu ý quan trọng**: 
+- Daemon chỉ hoạt động trên Windows (có MetaTrader5)
+- Cần cấu hình Telegram để nhận thông báo
+- Daemon tự động tạo PID file để tránh chạy nhiều instance
+- Sử dụng `daemon stop` để dừng gracefully
+
 ## 2. 📥 Module Import CSV (import_csv_data.py) - Import dữ liệu từ CSV
 
 ### Import CSV với delimiter mặc định (tab-separated từ MT5)
@@ -297,6 +374,17 @@ TRADE_END_TIME=23:00        # Thời gian kết thúc giao dịch (HH:MM)
 
 # Single Order Mode Configuration
 ENABLE_SINGLE_ORDER_MODE=true  # Bật/tắt chế độ chỉ 1 order tại một thời điểm
+
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN=your_bot_token_here  # Token của Telegram bot
+TELEGRAM_CHAT_ID=your_chat_id_here      # Chat ID để gửi thông báo
+ENABLE_TELEGRAM_NOTIFICATIONS=true     # Bật/tắt thông báo Telegram
+
+# Daemon Scheduler Configuration  
+SCHEDULER_ENABLED=true              # Bật/tắt scheduler daemon
+CRAWL_INTERVAL_MINUTES=15          # Khoảng cách giữa các lần crawl (phút)
+AUTO_DETECT_ENABLED=true           # Tự động detect signal sau khi crawl
+HEALTH_CHECK_INTERVAL_MINUTES=60   # Khoảng cách health check (phút)
 
 # Logging
 LOG_LEVEL=INFO
@@ -466,6 +554,38 @@ python main.py status
 # Import thêm dữ liệu 1m nếu thiếu
 python create_mql5_export.py  # Tạo M1 script
 python import_csv_data.py --file xauusd_m1_export.csv --timeframe 1m
+```
+
+### Lỗi Daemon Mode
+```bash
+# Daemon không start được
+python main.py daemon status  # Kiểm tra lỗi
+
+# Daemon bị crash
+tail -f logs/xau_signal_tools.log  # Xem logs chi tiết
+
+# Daemon không gửi Telegram
+# Kiểm tra config Telegram trong .env
+python test_telegram.py  # Test kết nối Telegram
+
+# Daemon crawl lỗi trên macOS  
+# Daemon yêu cầu MetaTrader5 (chỉ Windows), sử dụng CSV workflow trên macOS
+
+# Xóa daemon bị treo
+rm xau_daemon.pid  # Xóa PID file
+rm xau_daemon_status.json  # Xóa status file
+python main.py daemon start  # Start lại
+```
+
+### Lỗi Telegram Notifications
+```bash
+# Test kết nối Telegram
+python test_telegram.py
+
+# Kiểm tra config
+# TELEGRAM_BOT_TOKEN: Lấy từ @BotFather  
+# TELEGRAM_CHAT_ID: Lấy từ @userinfobot
+# ENABLE_TELEGRAM_NOTIFICATIONS=true
 ```
 
 ### Không có dữ liệu
