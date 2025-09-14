@@ -27,12 +27,10 @@ class SignalDetector:
         Returns:
             dict: Signal information or None if no signal
         """
-        # Check prerequisite conditions first
-        if not self._check_prerequisite_conditions(n1, n2, n3):
-            return None
+
         # Check Condition 1: Engulfing pattern (N2 vs N3, entry at N3)
         engulfing_signal = self._check_engulfing_pattern(n2, n3)
-        if engulfing_signal:
+        if engulfing_signal and self._check_prerequisite_conditions(n1, n2, n3, 'engulfing'):
             return {
                 'signal_type': engulfing_signal,
                 'condition': 'ENGULFING',
@@ -47,7 +45,7 @@ class SignalDetector:
         
         # Check Condition 2: Inside bar pattern (N1, N2, N3, entry at N3)
         inside_bar_signal = self._check_inside_bar_pattern(n1, n2, n3)
-        if inside_bar_signal:
+        if inside_bar_signal and self._check_prerequisite_conditions(n1, n2, n3, 'inside_bar'):
             return {
                 'signal_type': inside_bar_signal,
                 'condition': 'INSIDE_BAR',
@@ -62,7 +60,7 @@ class SignalDetector:
         
         return None
 
-    def _check_prerequisite_conditions(self, n1, n2, n3):
+    def _check_prerequisite_conditions(self, n1, n2, n3, signal = 'inside_bar'):
         """
         Check prerequisite conditions before pattern detection
         
@@ -84,18 +82,28 @@ class SignalDetector:
         amp3 = get_candle_amplitude_percentage(n3)
         
         # Check if all amplitudes are > 0.02%
-        if amp1 <= 0.02 or amp2 <= 0.02 or amp3 <= 0.02:
-            logger.debug(f"Amplitude check failed: N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}% (all must be > 0.02%)")
-            return False
+        if signal == 'engulfing':
+            if amp2 < 0.02 or amp3 < 0.02:
+                logger.debug(f"Amplitude check failed for signal ENGULFING: N2={amp2:.4f}%, N3={amp3:.4f}% (all must be > 0.02%)")
+                return False
+        else:
+            if amp1 < 0.02 or amp2 < 0.02 or amp3 < 0.02:
+                logger.debug(f"Amplitude check failed for signal INSIDE_BAR: N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}% (all must be > 0.02%)")
+                return False
         
         # Check amplitude differences > 0.01%
         diff_12 = abs(amp1 - amp2)
         diff_23 = abs(amp2 - amp3)
         diff_13 = abs(amp1 - amp3)
-        
-        if diff_12 <= 0.01 or diff_23 <= 0.01 or diff_13 <= 0.01:
-            logger.debug(f"Amplitude difference check failed: diff_12={diff_12:.4f}%, diff_23={diff_23:.4f}%, diff_13={diff_13:.4f}% (all must be > 0.01%)")
-            return False
+
+        if signal == 'engulfing':
+            if diff_23 < 0.01:
+                logger.debug(f"Amplitude difference check failed: diff_12={diff_23:.4f}% (all must be > 0.01%)")
+                return False
+        else:
+            if diff_12 < 0.01 or diff_23 < 0.01 or diff_13 < 0.01:
+                logger.debug(f"Amplitude difference check failed: diff_12={diff_12:.4f}%, diff_23={diff_23:.4f}%, diff_13={diff_13:.4f}% (all must be > 0.01%)")
+                return False
         
         logger.debug(f"Prerequisites passed: Amplitudes N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}%")
         return True

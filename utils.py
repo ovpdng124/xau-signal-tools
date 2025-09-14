@@ -108,12 +108,12 @@ def get_candle_amplitude_percentage(candle):
     Calculate candle amplitude as percentage
     
     Args:
-        candle: dict - Candle data with high and low
+        candle: dict - Candle data with open and close
     
     Returns:
-        float: Amplitude as percentage (high-low)/low * 100
+        float: Amplitude as percentage (open-close)/open * 100
     """
-    return ((candle['high'] - candle['low']) / candle['low']) * 100
+    return abs(candle['close'] - candle['open']) / candle['open'] * 100
 
 def is_within_trading_hours(timestamp, start_time_str, end_time_str):
     """
