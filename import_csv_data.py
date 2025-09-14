@@ -213,7 +213,28 @@ class CSVDataImporter:
             
             # Read MT5 CSV file (tab-separated from MQL5 FileWrite)
             logger.info("Reading MT5 CSV file...")
-            df = pd.read_csv(csv_file_path, sep='\t')
+            
+            # Try different encodings to handle BOM and various MT5 export formats
+            encodings_to_try = ['utf-8-sig', 'utf-8', 'utf-16', 'cp1252', 'iso-8859-1']
+            df = None
+            
+            for encoding in encodings_to_try:
+                try:
+                    logger.info(f"Trying encoding: {encoding}")
+                    df = pd.read_csv(csv_file_path, sep='\t', encoding=encoding)
+                    logger.info(f"Successfully read CSV with {encoding} encoding")
+                    break
+                except UnicodeDecodeError as e:
+                    logger.warning(f"Failed to read with {encoding}: {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Error with {encoding}: {e}")
+                    continue
+            
+            if df is None:
+                logger.error("Failed to read CSV file with any supported encoding")
+                return False
+                
             logger.info(f"CSV file loaded: {len(df)} records")
             
             # Validate CSV format
