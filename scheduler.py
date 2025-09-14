@@ -470,8 +470,8 @@ class DaemonScheduler:
             
             logger.info("Daemon cleanup completed")
             
-            if ENABLE_TELEGRAM_NOTIFICATIONS:
-                send_system_notification("🛑 XAU Signal Daemon stopped", "INFO")
+            # if ENABLE_TELEGRAM_NOTIFICATIONS:
+            #     send_system_notification("🛑 XAU Signal Daemon stopped", "INFO")
                 
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")

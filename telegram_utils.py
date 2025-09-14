@@ -239,6 +239,42 @@ class TelegramNotifier:
             logger.error(f"Error formatting trade notification: {e}")
             return False
     
+    def send_system_notification(self, message, level="INFO"):
+        """
+        Send system notification (errors, warnings, info)
+        
+        Args:
+            message: str - Notification message
+            level: str - Log level (INFO, WARNING, ERROR)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Choose emoji based on level
+            level_emojis = {
+                "INFO": "ℹ️",
+                "WARNING": "⚠️", 
+                "ERROR": "🚨"
+            }
+            
+            emoji = level_emojis.get(level.upper(), "ℹ️")
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            
+            formatted_message = f"""
+{emoji} <b>System {level}</b>
+
+{message}
+
+🕐 <i>{timestamp}</i>
+            """.strip()
+            
+            return self.send_message(formatted_message)
+            
+        except Exception as e:
+            logger.error(f"Error sending system notification: {e}")
+            return False
+    
     def test_connection(self):
         """
         Test Telegram bot connection
@@ -277,6 +313,10 @@ def send_trade_notification(trade_data):
 def send_backtest_summary(results_summary):
     """Convenience function to send backtest summary"""
     return telegram_notifier.send_backtest_summary(results_summary)
+
+def send_system_notification(message, level="INFO"):
+    """Convenience function to send system notification"""
+    return telegram_notifier.send_system_notification(message, level)
 
 def test_telegram_connection():
     """Convenience function to test Telegram connection"""
