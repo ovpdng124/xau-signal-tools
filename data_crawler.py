@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 import pandas as pd
-from api_client import TwelveDataClient
+import sys
 from models import Database
 from config import TIMEFRAME
 from logger import setup_logger
@@ -8,15 +8,145 @@ from utils import parse_datetime
 
 logger = setup_logger()
 
+# Check if MetaTrader5 is available (Windows only)
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+    logger.info("MetaTrader5 library loaded successfully")
+except ImportError:
+    MT5_AVAILABLE = False
+    logger.warning("MetaTrader5 library not available - this will only work on Windows")
+
 class DataCrawler:
     def __init__(self):
-        self.api_client = TwelveDataClient()
+        if not MT5_AVAILABLE:
+            logger.error("MetaTrader5 library is required for data crawling")
+            logger.error("This script must be run on Windows with MetaTrader5 installed")
+            logger.error("Install with: pip install MetaTrader5")
+            raise ImportError("MetaTrader5 library not available")
+        
         self.db = Database()
+        self.symbol = None
+        self.mt5_initialized = False
         logger.info("Data crawler initialized")
+
+    def _initialize_mt5(self):
+        """Initialize MT5 connection and find gold symbol"""
+        if self.mt5_initialized:
+            return True
+            
+        try:
+            # Initialize MT5
+            if not mt5.initialize():
+                logger.error(f"Failed to initialize MT5: {mt5.last_error()}")
+                return False
+            
+            logger.info("✓ Connected to MetaTrader5")
+            
+            # Find gold symbol
+            gold_symbols = ["XAUUSD", "GOLD", "XAUUSD.m", "Gold", "XAU/USD"]
+            
+            for gold_symbol in gold_symbols:
+                if mt5.symbol_select(gold_symbol, True):
+                    self.symbol = gold_symbol
+                    logger.info(f"✓ Found gold symbol: {self.symbol}")
+                    self.mt5_initialized = True
+                    return True
+            
+            # If no symbol found, list available symbols
+            logger.error("✗ No gold symbol found. Available symbols:")
+            symbols = mt5.symbols_get()
+            if symbols:
+                for s in symbols[:20]:  # Show first 20 symbols
+                    logger.info(f"  {s.name}")
+            
+            mt5.shutdown()
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error initializing MT5: {e}")
+            return False
+
+    def _shutdown_mt5(self):
+        """Shutdown MT5 connection"""
+        if self.mt5_initialized:
+            mt5.shutdown()
+            self.mt5_initialized = False
+            logger.info("✓ Disconnected from MT5")
+
+    def _get_mt5_data(self, start_date, end_date):
+        """Get data from MT5"""
+        try:
+            # Convert to timezone-aware datetime if needed
+            if isinstance(start_date, str):
+                start_dt = parse_datetime(start_date)
+            else:
+                start_dt = start_date
+                
+            if isinstance(end_date, str):
+                end_dt = parse_datetime(end_date)
+            else:
+                end_dt = end_date
+            
+            # Ensure timezone info
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            
+            logger.info(f"✓ Getting {self.symbol} data from {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}")
+            
+            # Determine timeframe
+            if TIMEFRAME == 15:
+                timeframe = mt5.TIMEFRAME_M15
+            elif TIMEFRAME == 5:
+                timeframe = mt5.TIMEFRAME_M5
+            elif TIMEFRAME == 1:
+                timeframe = mt5.TIMEFRAME_M1
+            elif TIMEFRAME == 60:
+                timeframe = mt5.TIMEFRAME_H1
+            else:
+                timeframe = mt5.TIMEFRAME_M15  # Default
+                logger.warning(f"Unsupported timeframe {TIMEFRAME}min, using M15")
+            
+            # Get data from MT5
+            rates = mt5.copy_rates_range(self.symbol, timeframe, start_dt, end_dt)
+            
+            if rates is None or len(rates) == 0:
+                logger.error("✗ No data retrieved from MT5")
+                return None
+            
+            logger.info(f"✓ Retrieved {len(rates)} {TIMEFRAME}-minute bars from MT5")
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(rates)
+            df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+            
+            # Rename columns to match our database schema
+            df = df.rename(columns={
+                'open': 'open',
+                'high': 'high', 
+                'low': 'low',
+                'close': 'close',
+                'tick_volume': 'volume'
+            })
+            
+            # Select only the columns we need
+            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            
+            # Remove timezone info to match database format
+            df['timestamp'] = df['timestamp'].dt.tz_localize(None)
+            
+            logger.info(f"✓ Converted MT5 data to DataFrame format")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting MT5 data: {e}")
+            return None
 
     def crawl_historical_data(self, start_date, end_date):
         """
-        Crawl historical OHLCV data for XAU/USD
+        Crawl historical OHLCV data for XAU/USD using MetaTrader5
         
         Args:
             start_date: str or datetime - Start date for data crawling
@@ -26,28 +156,21 @@ class DataCrawler:
             bool: True if successful, False otherwise
         """
         try:
+            # Initialize MT5 connection
+            if not self._initialize_mt5():
+                return False
+            
             start_dt = parse_datetime(start_date) if isinstance(start_date, str) else start_date
             end_dt = parse_datetime(end_date) if isinstance(end_date, str) else end_date
             
-            logger.info(f"Starting historical data crawl from {start_dt} to {end_dt}")
+            logger.info(f"Starting MT5 historical data crawl from {start_dt} to {end_dt}")
             
-            # Estimate requests needed
-            estimation = self.api_client.estimate_requests_needed(start_dt, end_dt, f"{TIMEFRAME}min")
-            logger.info(f"Estimated requests needed: {estimation['estimated_requests']}")
-            logger.info(f"Estimated time: {estimation['estimated_time_minutes']:.1f} minutes")
-            
-            if estimation['estimated_requests'] > 100:
-                logger.warning(f"This will require {estimation['estimated_requests']} requests. Consider splitting into smaller date ranges.")
-            
-            # Fetch candle data (API client handles chunking automatically)
-            df = self.api_client.get_candles(
-                start_time=start_dt,
-                end_time=end_dt,
-                resolution=f"{TIMEFRAME}min"
-            )
+            # Get data from MT5
+            df = self._get_mt5_data(start_dt, end_dt)
             
             if df is None or df.empty:
-                logger.error("Failed to fetch any data")
+                logger.error("Failed to fetch any data from MT5")
+                self._shutdown_mt5()
                 return False
             
             # Save to database
@@ -56,62 +179,66 @@ class DataCrawler:
                 logger.info(f"Saved {len(df)} candles to database")
             except Exception as e:
                 logger.error(f"Failed to save candles to database: {e}")
+                self._shutdown_mt5()
                 return False
             
-            # Check rate limit status
-            rate_status = self.api_client.get_rate_limit_status()
-            logger.info(f"Rate limit status: {rate_status['remaining_calls']} calls remaining")
-            
-            logger.info(f"Historical data crawl completed. Total candles saved: {len(df)}")
+            logger.info(f"MT5 historical data crawl completed. Total candles saved: {len(df)}")
+            self._shutdown_mt5()
             return True
             
         except Exception as e:
-            logger.error(f"Error during historical data crawl: {e}")
+            logger.error(f"Error during MT5 historical data crawl: {e}")
+            self._shutdown_mt5()
             return False
 
     def crawl_incremental_data(self):
         """
-        Crawl only new data since the last candle in database
+        Crawl only new data since the last candle in database using MetaTrader5
         
         Returns:
             bool: True if successful, False otherwise
         """
         try:
+            # Initialize MT5 connection
+            if not self._initialize_mt5():
+                return False
+                
             # Get the latest candle timestamp from database
             latest_time = self.db.get_latest_candle_time()
             
             if latest_time is None:
                 logger.warning("No existing data found. Use crawl_historical_data() instead.")
+                self._shutdown_mt5()
                 return False
             
             # Calculate start time for incremental crawl (add one timeframe to avoid duplicate)
             start_time = latest_time + timedelta(minutes=TIMEFRAME)
             end_time = datetime.now()
             
-            logger.info(f"Starting incremental data crawl from {start_time} to {end_time}")
+            logger.info(f"Starting MT5 incremental data crawl from {start_time} to {end_time}")
             
-            # Fetch new data
-            df = self.api_client.get_candles(
-                start_time=start_time,
-                end_time=end_time,
-                resolution=f"{TIMEFRAME}min"
-            )
+            # Get new data from MT5
+            df = self._get_mt5_data(start_time, end_time)
             
             if df is None:
-                logger.error("Failed to fetch incremental data")
+                logger.error("Failed to fetch incremental data from MT5")
+                self._shutdown_mt5()
                 return False
             
             if df.empty:
                 logger.info("No new data to crawl")
+                self._shutdown_mt5()
                 return True
             
             # Save new data to database
             self.db.save_candles(df)
-            logger.info(f"Incremental crawl completed. Saved {len(df)} new candles")
+            logger.info(f"MT5 incremental crawl completed. Saved {len(df)} new candles")
+            self._shutdown_mt5()
             return True
             
         except Exception as e:
-            logger.error(f"Error during incremental data crawl: {e}")
+            logger.error(f"Error during MT5 incremental data crawl: {e}")
+            self._shutdown_mt5()
             return False
 
     def validate_data_integrity(self, start_date=None, end_date=None):
@@ -190,7 +317,7 @@ class DataCrawler:
 
     def fill_data_gaps(self, gaps):
         """
-        Fill identified data gaps by fetching missing data from API
+        Fill identified data gaps by fetching missing data from MetaTrader5
         
         Args:
             gaps: list - List of gaps from validate_data_integrity()
@@ -203,16 +330,16 @@ class DataCrawler:
             return True
         
         try:
+            # Initialize MT5 connection
+            if not self._initialize_mt5():
+                return False
+                
             total_filled = 0
             
             for gap in gaps:
                 logger.info(f"Filling gap from {gap['start']} to {gap['end']}")
                 
-                df = self.api_client.get_candles(
-                    start_time=gap['start'],
-                    end_time=gap['end'],
-                    resolution=f"{TIMEFRAME}min"
-                )
+                df = self._get_mt5_data(gap['start'], gap['end'])
                 
                 if df is not None and not df.empty:
                     self.db.save_candles(df)
@@ -221,11 +348,13 @@ class DataCrawler:
                 else:
                     logger.warning(f"Could not fill gap from {gap['start']} to {gap['end']}")
             
-            logger.info(f"Gap filling completed. Total {total_filled} candles added")
+            logger.info(f"MT5 gap filling completed. Total {total_filled} candles added")
+            self._shutdown_mt5()
             return True
             
         except Exception as e:
-            logger.error(f"Error during gap filling: {e}")
+            logger.error(f"Error during MT5 gap filling: {e}")
+            self._shutdown_mt5()
             return False
 
     def get_data_summary(self):
@@ -267,6 +396,7 @@ class DataCrawler:
             }
 
     def close(self):
-        """Close database connection"""
+        """Close MT5 and database connections"""
+        self._shutdown_mt5()
         self.db.close()
         logger.info("Data crawler closed")

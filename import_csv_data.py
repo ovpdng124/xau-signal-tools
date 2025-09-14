@@ -47,7 +47,7 @@ class CSVDataImporter:
 
     def validate_csv_format(self, df):
         """
-        Validate that CSV has the expected format and columns
+        Validate MT5 CSV format: timestamp,open,high,low,close,volume
         
         Args:
             df: DataFrame to validate
@@ -55,10 +55,11 @@ class CSVDataImporter:
         Returns:
             bool: True if valid, False otherwise
         """
-        expected_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        expected_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+        actual_columns = list(df.columns)
         
-        if list(df.columns) != expected_columns:
-            logger.error(f"Invalid CSV columns. Expected: {expected_columns}, Got: {list(df.columns)}")
+        if actual_columns != expected_columns:
+            logger.error(f"Invalid CSV columns. Expected: {expected_columns}, Got: {actual_columns}")
             return False
         
         # Check if we have data
@@ -66,11 +67,13 @@ class CSVDataImporter:
             logger.error("CSV file is empty")
             return False
         
-        # Sample a few date entries to validate format
-        sample_dates = df['Date'].head(3).tolist()
+        # Validate timestamp format
+        sample_dates = df['timestamp'].head(3).tolist()
         for date_str in sample_dates:
-            if self.parse_csv_date(date_str) is None:
-                logger.error(f"Invalid date format found: {date_str}")
+            try:
+                pd.to_datetime(date_str)
+            except:
+                logger.error(f"Invalid timestamp format: {date_str}")
                 return False
         
         logger.info(f"CSV validation passed. Found {len(df)} records")
@@ -78,7 +81,7 @@ class CSVDataImporter:
 
     def process_csv_data(self, df):
         """
-        Process CSV data into the format expected by database
+        Process MT5 CSV data into the format expected by database
         
         Args:
             df: Raw DataFrame from CSV
@@ -86,13 +89,13 @@ class CSVDataImporter:
         Returns:
             DataFrame: Processed DataFrame ready for database insert
         """
-        logger.info("Processing CSV data...")
+        logger.info("Processing MT5 CSV data...")
         
         # Create a copy to avoid modifying original
         processed_df = df.copy()
         
-        # Parse dates
-        processed_df['timestamp'] = processed_df['Date'].apply(self.parse_csv_date)
+        # Convert timestamp to datetime
+        processed_df['timestamp'] = pd.to_datetime(processed_df['timestamp'])
         
         # Remove rows with invalid dates
         invalid_dates = processed_df['timestamp'].isna()
@@ -100,18 +103,6 @@ class CSVDataImporter:
             invalid_count = invalid_dates.sum()
             logger.warning(f"Removing {invalid_count} rows with invalid dates")
             processed_df = processed_df.dropna(subset=['timestamp'])
-        
-        # Rename columns to match database schema
-        processed_df = processed_df.rename(columns={
-            'Open': 'open',
-            'High': 'high', 
-            'Low': 'low',
-            'Close': 'close',
-            'Volume': 'volume'
-        })
-        
-        # Select only the columns we need
-        processed_df = processed_df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
         
         # Convert numeric columns to proper types
         numeric_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -220,9 +211,9 @@ class CSVDataImporter:
         try:
             logger.info(f"Starting CSV import from: {csv_file_path}")
             
-            # Read CSV file
-            logger.info("Reading CSV file...")
-            df = pd.read_csv(csv_file_path, sep=';')
+            # Read MT5 CSV file (tab-separated from MQL5 FileWrite)
+            logger.info("Reading MT5 CSV file...")
+            df = pd.read_csv(csv_file_path, sep='\t')
             logger.info(f"CSV file loaded: {len(df)} records")
             
             # Validate CSV format
@@ -288,7 +279,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python import_csv_data.py                                    # Import XAU_15m_data.csv with default settings
+  python import_csv_data.py                                    # Import xauusd_export.csv with default settings
   python import_csv_data.py --file my_data.csv               # Import custom CSV file  
   python import_csv_data.py --batch-size 5000                # Use larger batch size
   python import_csv_data.py --dry-run                        # Validate only, don't import
@@ -296,8 +287,8 @@ Examples:
         """
     )
     
-    parser.add_argument('--file', type=str, default='XAU_15m_data.csv',
-                       help='Path to CSV file (default: XAU_15m_data.csv)')
+    parser.add_argument('--file', type=str, default='xauusd_export.csv',
+                       help='Path to CSV file (default: xauusd_export.csv from MT5)')
     parser.add_argument('--batch-size', type=int, default=1000,
                        help='Number of records to process in each batch (default: 1000)')
     parser.add_argument('--dry-run', action='store_true',
