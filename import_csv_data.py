@@ -8,9 +8,13 @@ It's designed to work with the XAU_15m_data.csv file format.
 Usage:
     python import_csv_data.py [--file CSV_FILE_PATH] [--batch-size BATCH_SIZE] [--dry-run]
 
-CSV Format Expected:
-    Date;Open;High;Low;Close;Volume
-    2004.06.11 07:15;384;384.3;383.8;384.3;12
+CSV Format Expected (default tab-separated from MT5):
+    timestamp\topen\thigh\tlow\tclose\tvolume
+    2025-09-12 02:31:00\t3635.33\t3635.33\t3634.33\t3634.33\t12
+    
+Alternative semicolon-separated format:
+    timestamp;open;high;low;close;volume
+    2025-09-12 02:31:00;3635.33;3635.33;3634.33;3634.33;12
 """
 
 import argparse
@@ -238,7 +242,32 @@ class CSVDataImporter:
             logger.error(f"Failed to import batch {batch_num}: {e}")
             return 0
 
-    def import_csv_file(self, csv_file_path, batch_size=1000, dry_run=False, timeframe=None):
+    def convert_delimiter_name(self, delimiter_name):
+        """
+        Convert delimiter name to actual delimiter character
+        
+        Args:
+            delimiter_name: Delimiter name or character
+        
+        Returns:
+            str: Actual delimiter character
+        """
+        delimiter_mapping = {
+            'tab': '\t',
+            'comma': ',', 
+            'semicolon': ';',
+            'pipe': '|',
+            'space': ' '
+        }
+        
+        # If it's a known name, convert it
+        if delimiter_name.lower() in delimiter_mapping:
+            return delimiter_mapping[delimiter_name.lower()]
+        
+        # If it's already a character (like ';', ','), return as-is
+        return delimiter_name
+
+    def import_csv_file(self, csv_file_path, batch_size=1000, dry_run=False, timeframe=None, delimiter='tab'):
         """
         Import data from CSV file into database
         
@@ -247,6 +276,7 @@ class CSVDataImporter:
             batch_size: Number of records to process in each batch
             dry_run: If True, only validate and show statistics without importing
             timeframe: Timeframe for the data (auto-detected from filename if None)
+            delimiter: CSV delimiter ('tab', 'comma', 'semicolon', 'pipe', 'space' or actual character)
         
         Returns:
             bool: True if successful, False otherwise
@@ -260,8 +290,12 @@ class CSVDataImporter:
             
             logger.info(f"Using timeframe: {timeframe}")
             
-            # Read MT5 CSV file (tab-separated from MQL5 FileWrite)
-            logger.info("Reading MT5 CSV file...")
+            # Convert delimiter name to character
+            csv_delimiter = self.convert_delimiter_name(delimiter)
+            logger.info(f"Using CSV delimiter: '{csv_delimiter}' (from parameter: '{delimiter}')")
+            
+            # Read CSV file with specified delimiter
+            logger.info("Reading CSV file...")
             
             # Try different encodings to handle BOM and various MT5 export formats
             encodings_to_try = ['utf-8-sig', 'utf-8', 'utf-16', 'cp1252', 'iso-8859-1']
@@ -269,15 +303,15 @@ class CSVDataImporter:
             
             for encoding in encodings_to_try:
                 try:
-                    logger.info(f"Trying encoding: {encoding}")
-                    df = pd.read_csv(csv_file_path, sep='\t', encoding=encoding)
-                    logger.info(f"Successfully read CSV with {encoding} encoding")
+                    logger.info(f"Trying encoding: {encoding} with delimiter: '{csv_delimiter}'")
+                    df = pd.read_csv(csv_file_path, sep=csv_delimiter, encoding=encoding)
+                    logger.info(f"Successfully read CSV with {encoding} encoding and '{csv_delimiter}' delimiter")
                     break
                 except UnicodeDecodeError as e:
                     logger.warning(f"Failed to read with {encoding}: {e}")
                     continue
                 except Exception as e:
-                    logger.warning(f"Error with {encoding}: {e}")
+                    logger.warning(f"Error with {encoding} and delimiter '{csv_delimiter}': {e}")
                     continue
             
             if df is None:
@@ -349,11 +383,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python import_csv_data.py                                    # Import xauusd_export.csv with default settings
+  python import_csv_data.py                                    # Import xauusd_export.csv with default settings (tab-separated)
   python import_csv_data.py --file my_data.csv               # Import custom CSV file  
+  python import_csv_data.py --delimiter comma                # Import comma-separated CSV
+  python import_csv_data.py --delimiter semicolon            # Import semicolon-separated CSV
+  python import_csv_data.py --delimiter ";"                  # Import using actual semicolon character
   python import_csv_data.py --batch-size 5000                # Use larger batch size
   python import_csv_data.py --dry-run                        # Validate only, don't import
-  python import_csv_data.py --file data.csv --dry-run        # Test custom file validation
+  python import_csv_data.py --file data.csv --delimiter comma --dry-run  # Test comma-separated file validation
         """
     )
     
@@ -363,6 +400,8 @@ Examples:
                        help='Number of records to process in each batch (default: 1000)')
     parser.add_argument('--timeframe', type=str, default=None,
                        help='Timeframe for the data (e.g., 15m, 1h, 4h, 1d). Auto-detected from filename if not provided')
+    parser.add_argument('--delimiter', type=str, default='tab',
+                       help='CSV delimiter: tab, comma, semicolon, pipe, space or actual character like ";" or "," (default: tab)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Validate file and show statistics without importing data')
     
@@ -377,7 +416,8 @@ Examples:
             csv_file_path=args.file,
             batch_size=args.batch_size,
             dry_run=args.dry_run,
-            timeframe=args.timeframe
+            timeframe=args.timeframe,
+            delimiter=args.delimiter
         )
         
         importer.close()
