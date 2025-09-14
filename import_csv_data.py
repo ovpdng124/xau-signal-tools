@@ -28,6 +28,42 @@ class CSVDataImporter:
         self.engine = create_engine(DATABASE_URL)
         logger.info("CSV Data Importer initialized")
 
+    def detect_timeframe_from_filename(self, filename):
+        """
+        Detect timeframe from filename pattern like 'xauusd_m15_export.csv'
+        
+        Args:
+            filename: CSV filename
+        
+        Returns:
+            str: Timeframe (e.g., '15m', '1h', '4h', '1d')
+        """
+        import os
+        import re
+        
+        filename = os.path.basename(filename).lower()
+        
+        # Pattern mappings from filename to standard timeframe format
+        # Order matters: check longer patterns first to avoid partial matches
+        timeframe_patterns = {
+            r'm30|30m': '30m',
+            r'm15|15m': '15m',
+            r'm5|5m': '5m',
+            r'm1|1m': '1m',
+            r'h4|4h': '4h',
+            r'h1|1h': '1h',
+            r'd1|1d|daily': '1d'
+        }
+        
+        for pattern, timeframe in timeframe_patterns.items():
+            if re.search(pattern, filename):
+                logger.info(f"Detected timeframe '{timeframe}' from filename: {filename}")
+                return timeframe
+        
+        # Default to 15m if no pattern found
+        logger.warning(f"Could not detect timeframe from filename '{filename}', defaulting to '15m'")
+        return '15m'
+
     def parse_csv_date(self, date_str):
         """
         Parse CSV date format (YYYY.MM.DD HH:MM) to datetime object
@@ -122,9 +158,12 @@ class CSVDataImporter:
         logger.info(f"Data processing completed. {len(processed_df)} records ready for import")
         return processed_df
 
-    def get_existing_data_range(self):
+    def get_existing_data_range(self, timeframe='15m'):
         """
-        Get the date range of existing data in database
+        Get the date range of existing data in database for specific timeframe
+        
+        Args:
+            timeframe: Timeframe to check (e.g., '15m', '1h')
         
         Returns:
             dict: Dictionary with min_date and max_date, or None if no data
@@ -137,7 +176,8 @@ class CSVDataImporter:
                         MAX(timestamp) as max_date,
                         COUNT(*) as total_count
                     FROM candles
-                """)).fetchone()
+                    WHERE timeframe = :timeframe
+                """), {"timeframe": timeframe}).fetchone()
                 
                 if result and result.total_count > 0:
                     return {
@@ -151,7 +191,7 @@ class CSVDataImporter:
             logger.error(f"Failed to get existing data range: {e}")
             return None
 
-    def import_data_batch(self, df_batch, batch_num, total_batches):
+    def import_data_batch(self, df_batch, batch_num, total_batches, timeframe='15m'):
         """
         Import a batch of data into database
         
@@ -159,18 +199,20 @@ class CSVDataImporter:
             df_batch: DataFrame batch to import
             batch_num: Current batch number
             total_batches: Total number of batches
+            timeframe: Timeframe for the data
         
         Returns:
             int: Number of records successfully inserted
         """
         try:
-            logger.info(f"Importing batch {batch_num}/{total_batches} ({len(df_batch)} records)")
+            logger.info(f"Importing batch {batch_num}/{total_batches} ({len(df_batch)} records) for {timeframe}")
             
             # Prepare data for bulk insert
             records = []
             for _, row in df_batch.iterrows():
                 records.append({
                     'timestamp': row['timestamp'],
+                    'timeframe': timeframe,
                     'open': float(row['open']),
                     'high': float(row['high']),
                     'low': float(row['low']),
@@ -178,25 +220,25 @@ class CSVDataImporter:
                     'volume': int(row['volume'])
                 })
             
-            # Use bulk insert with ON CONFLICT DO NOTHING
+            # Use bulk insert with ON CONFLICT DO NOTHING (updated for timestamp + timeframe)
             with self.engine.connect() as conn:
                 result = conn.execute(text("""
-                    INSERT INTO candles (timestamp, open, high, low, close, volume)
-                    VALUES (:timestamp, :open, :high, :low, :close, :volume)
-                    ON CONFLICT (timestamp) DO NOTHING
+                    INSERT INTO candles (timestamp, timeframe, open, high, low, close, volume)
+                    VALUES (:timestamp, :timeframe, :open, :high, :low, :close, :volume)
+                    ON CONFLICT (timestamp, timeframe) DO NOTHING
                 """), records)
                 
                 conn.commit()
                 inserted_count = result.rowcount
                 
-                logger.info(f"Batch {batch_num}/{total_batches} completed: {inserted_count} new records inserted")
+                logger.info(f"Batch {batch_num}/{total_batches} completed: {inserted_count} new {timeframe} records inserted")
                 return inserted_count
                 
         except Exception as e:
             logger.error(f"Failed to import batch {batch_num}: {e}")
             return 0
 
-    def import_csv_file(self, csv_file_path, batch_size=1000, dry_run=False):
+    def import_csv_file(self, csv_file_path, batch_size=1000, dry_run=False, timeframe=None):
         """
         Import data from CSV file into database
         
@@ -204,12 +246,19 @@ class CSVDataImporter:
             csv_file_path: Path to CSV file
             batch_size: Number of records to process in each batch
             dry_run: If True, only validate and show statistics without importing
+            timeframe: Timeframe for the data (auto-detected from filename if None)
         
         Returns:
             bool: True if successful, False otherwise
         """
         try:
             logger.info(f"Starting CSV import from: {csv_file_path}")
+            
+            # Auto-detect timeframe from filename if not provided
+            if timeframe is None:
+                timeframe = self.detect_timeframe_from_filename(csv_file_path)
+            
+            logger.info(f"Using timeframe: {timeframe}")
             
             # Read MT5 CSV file (tab-separated from MQL5 FileWrite)
             logger.info("Reading MT5 CSV file...")
@@ -252,12 +301,12 @@ class CSVDataImporter:
             max_date = processed_df['timestamp'].max()
             logger.info(f"CSV data range: {min_date} to {max_date}")
             
-            # Check existing data
-            existing_range = self.get_existing_data_range()
+            # Check existing data for this timeframe
+            existing_range = self.get_existing_data_range(timeframe)
             if existing_range:
-                logger.info(f"Existing DB data: {existing_range['total_count']} records from {existing_range['min_date']} to {existing_range['max_date']}")
+                logger.info(f"Existing DB data for {timeframe}: {existing_range['total_count']} records from {existing_range['min_date']} to {existing_range['max_date']}")
             else:
-                logger.info("No existing data in database")
+                logger.info(f"No existing {timeframe} data in database")
             
             if dry_run:
                 logger.info("DRY RUN MODE - No data will be imported")
@@ -274,7 +323,7 @@ class CSVDataImporter:
                 batch_df = processed_df.iloc[i:i+batch_size]
                 batch_num = (i // batch_size) + 1
                 
-                inserted = self.import_data_batch(batch_df, batch_num, total_batches)
+                inserted = self.import_data_batch(batch_df, batch_num, total_batches, timeframe)
                 total_inserted += inserted
             
             logger.info(f"Import completed successfully!")
@@ -312,6 +361,8 @@ Examples:
                        help='Path to CSV file (default: xauusd_export.csv from MT5)')
     parser.add_argument('--batch-size', type=int, default=1000,
                        help='Number of records to process in each batch (default: 1000)')
+    parser.add_argument('--timeframe', type=str, default=None,
+                       help='Timeframe for the data (e.g., 15m, 1h, 4h, 1d). Auto-detected from filename if not provided')
     parser.add_argument('--dry-run', action='store_true',
                        help='Validate file and show statistics without importing data')
     
@@ -325,7 +376,8 @@ Examples:
         success = importer.import_csv_file(
             csv_file_path=args.file,
             batch_size=args.batch_size,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
+            timeframe=args.timeframe
         )
         
         importer.close()

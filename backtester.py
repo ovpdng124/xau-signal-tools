@@ -19,11 +19,12 @@ from logger import setup_logger
 logger = setup_logger()
 
 class Backtester:
-    def __init__(self):
+    def __init__(self, timeframe='15m'):
         self.db = Database()
         self.signal_detector = SignalDetector()
         self.active_orders = []  # Store active orders in memory
         self.completed_orders = []  # Store completed orders for results
+        self.timeframe = timeframe
         
         # Log configuration
         config_info = []
@@ -33,9 +34,9 @@ class Backtester:
             config_info.append("single order mode")
         
         if config_info:
-            logger.info(f"Backtester initialized with {', '.join(config_info)}")
+            logger.info(f"Backtester initialized for {timeframe} with {', '.join(config_info)}")
         else:
-            logger.info("Backtester initialized (default mode: multiple orders, no time restrictions)")
+            logger.info(f"Backtester initialized for {timeframe} (default mode: multiple orders, no time restrictions)")
         
 
     def run_backtest(self, start_date, end_date):
@@ -55,8 +56,8 @@ class Backtester:
             
             logger.info(f"Starting backtest from {start_dt} to {end_dt}")
             
-            # Load historical data from database
-            df = self.db.load_candles(start_dt, end_dt)
+            # Load historical data from database for specific timeframe
+            df = self.db.load_candles(start_dt, end_dt, self.timeframe)
             
             if df.empty:
                 logger.error("No historical data found for backtest period")

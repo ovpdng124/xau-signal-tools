@@ -18,7 +18,7 @@ except ImportError:
     logger.warning("MetaTrader5 library not available - this will only work on Windows")
 
 class DataCrawler:
-    def __init__(self):
+    def __init__(self, timeframe='15m'):
         if not MT5_AVAILABLE:
             logger.error("MetaTrader5 library is required for data crawling")
             logger.error("This script must be run on Windows with MetaTrader5 installed")
@@ -28,7 +28,46 @@ class DataCrawler:
         self.db = Database()
         self.symbol = None
         self.mt5_initialized = False
-        logger.info("Data crawler initialized")
+        self.timeframe = timeframe
+        logger.info(f"Data crawler initialized for {timeframe} timeframe")
+
+    def _get_mt5_timeframe(self, timeframe_str):
+        """Convert timeframe string to MT5 timeframe constant"""
+        timeframe_mapping = {
+            '1m': mt5.TIMEFRAME_M1,
+            '5m': mt5.TIMEFRAME_M5,
+            '15m': mt5.TIMEFRAME_M15,
+            '30m': mt5.TIMEFRAME_M30,
+            '1h': mt5.TIMEFRAME_H1,
+            '4h': mt5.TIMEFRAME_H4,
+            '1d': mt5.TIMEFRAME_D1
+        }
+        
+        mt5_timeframe = timeframe_mapping.get(timeframe_str.lower())
+        if mt5_timeframe is None:
+            logger.warning(f"Unsupported timeframe {timeframe_str}, using 15m")
+            return mt5.TIMEFRAME_M15
+        
+        return mt5_timeframe
+
+    def _get_timeframe_minutes(self, timeframe_str):
+        """Convert timeframe string to minutes"""
+        timeframe_minutes = {
+            '1m': 1,
+            '5m': 5,
+            '15m': 15,
+            '30m': 30,
+            '1h': 60,
+            '4h': 240,
+            '1d': 1440
+        }
+        
+        minutes = timeframe_minutes.get(timeframe_str.lower())
+        if minutes is None:
+            logger.warning(f"Unknown timeframe {timeframe_str}, using 15 minutes")
+            return 15
+        
+        return minutes
 
     def _initialize_mt5(self):
         """Initialize MT5 connection and find gold symbol"""
@@ -94,29 +133,19 @@ class DataCrawler:
             if end_dt.tzinfo is None:
                 end_dt = end_dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
             
-            logger.info(f"✓ Getting {self.symbol} data from {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}")
+            logger.info(f"✓ Getting {self.symbol} data from {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')} ({self.timeframe})")
             
-            # Determine timeframe
-            if TIMEFRAME == 15:
-                timeframe = mt5.TIMEFRAME_M15
-            elif TIMEFRAME == 5:
-                timeframe = mt5.TIMEFRAME_M5
-            elif TIMEFRAME == 1:
-                timeframe = mt5.TIMEFRAME_M1
-            elif TIMEFRAME == 60:
-                timeframe = mt5.TIMEFRAME_H1
-            else:
-                timeframe = mt5.TIMEFRAME_M15  # Default
-                logger.warning(f"Unsupported timeframe {TIMEFRAME}min, using M15")
+            # Get MT5 timeframe constant
+            mt5_timeframe = self._get_mt5_timeframe(self.timeframe)
             
             # Get data from MT5
-            rates = mt5.copy_rates_range(self.symbol, timeframe, start_dt, end_dt)
+            rates = mt5.copy_rates_range(self.symbol, mt5_timeframe, start_dt, end_dt)
             
             if rates is None or len(rates) == 0:
                 logger.error("✗ No data retrieved from MT5")
                 return None
             
-            logger.info(f"✓ Retrieved {len(rates)} {TIMEFRAME}-minute bars from MT5")
+            logger.info(f"✓ Retrieved {len(rates)} {self.timeframe} bars from MT5")
             
             # Convert to DataFrame
             df = pd.DataFrame(rates)
@@ -175,8 +204,8 @@ class DataCrawler:
             
             # Save to database
             try:
-                self.db.save_candles(df)
-                logger.info(f"Saved {len(df)} candles to database")
+                self.db.save_candles(df, self.timeframe)
+                logger.info(f"Saved {len(df)} {self.timeframe} candles to database")
             except Exception as e:
                 logger.error(f"Failed to save candles to database: {e}")
                 self._shutdown_mt5()
@@ -203,16 +232,17 @@ class DataCrawler:
             if not self._initialize_mt5():
                 return False
                 
-            # Get the latest candle timestamp from database
-            latest_time = self.db.get_latest_candle_time()
+            # Get the latest candle timestamp from database for this timeframe
+            latest_time = self.db.get_latest_candle_time(self.timeframe)
             
             if latest_time is None:
-                logger.warning("No existing data found. Use crawl_historical_data() instead.")
+                logger.warning(f"No existing {self.timeframe} data found. Use crawl_historical_data() instead.")
                 self._shutdown_mt5()
                 return False
             
             # Calculate start time for incremental crawl (add one timeframe to avoid duplicate)
-            start_time = latest_time + timedelta(minutes=TIMEFRAME)
+            timeframe_minutes = self._get_timeframe_minutes(self.timeframe)
+            start_time = latest_time + timedelta(minutes=timeframe_minutes)
             end_time = datetime.now()
             
             logger.info(f"Starting MT5 incremental data crawl from {start_time} to {end_time}")
@@ -231,8 +261,8 @@ class DataCrawler:
                 return True
             
             # Save new data to database
-            self.db.save_candles(df)
-            logger.info(f"MT5 incremental crawl completed. Saved {len(df)} new candles")
+            self.db.save_candles(df, self.timeframe)
+            logger.info(f"MT5 incremental crawl completed. Saved {len(df)} new {self.timeframe} candles")
             self._shutdown_mt5()
             return True
             

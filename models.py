@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, DECIMAL, TIMESTAMP, String, BigInteger, text
+from sqlalchemy import create_engine, Column, Integer, DECIMAL, TIMESTAMP, String, BigInteger, text, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -13,13 +13,19 @@ class Candle(Base):
     __tablename__ = 'candles'
     
     id = Column(Integer, primary_key=True)
-    timestamp = Column(TIMESTAMP, nullable=False, unique=True)
+    timestamp = Column(TIMESTAMP, nullable=False)
+    timeframe = Column(String(10), nullable=False, default='15m')  # '1m', '5m', '15m', '30m', '1h', '4h', '1d'
     open = Column(DECIMAL(10, 5), nullable=False)
     high = Column(DECIMAL(10, 5), nullable=False)
     low = Column(DECIMAL(10, 5), nullable=False)
     close = Column(DECIMAL(10, 5), nullable=False)
     volume = Column(BigInteger, nullable=False, default=0)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
+    
+    # Composite unique constraint for timestamp + timeframe
+    __table_args__ = (
+        UniqueConstraint('timestamp', 'timeframe', name='uq_candles_timestamp_timeframe'),
+    )
 
 class Signal(Base):
     __tablename__ = 'signals'
@@ -48,7 +54,7 @@ class Database:
     def get_session(self):
         return self.SessionLocal()
 
-    def save_candles(self, df):
+    def save_candles(self, df, timeframe='15m'):
         try:
             session = self.get_session()
             candles = []
@@ -56,6 +62,7 @@ class Database:
             for _, row in df.iterrows():
                 candle = Candle(
                     timestamp=row['timestamp'],
+                    timeframe=timeframe,
                     open=float(row['open']),
                     high=float(row['high']),
                     low=float(row['low']),
@@ -64,14 +71,15 @@ class Database:
                 )
                 candles.append(candle)
             
-            # Use bulk insert with on conflict ignore
+            # Use bulk insert with on conflict ignore (updated for timestamp + timeframe)
             session.execute(text("""
-                INSERT INTO candles (timestamp, open, high, low, close, volume)
-                VALUES (:timestamp, :open, :high, :low, :close, :volume)
-                ON CONFLICT (timestamp) DO NOTHING
+                INSERT INTO candles (timestamp, timeframe, open, high, low, close, volume)
+                VALUES (:timestamp, :timeframe, :open, :high, :low, :close, :volume)
+                ON CONFLICT (timestamp, timeframe) DO NOTHING
             """), [
                 {
                     'timestamp': candle.timestamp,
+                    'timeframe': candle.timeframe,
                     'open': candle.open,
                     'high': candle.high,
                     'low': candle.low,
@@ -81,7 +89,7 @@ class Database:
             ])
             
             session.commit()
-            logger.info(f"Saved {len(candles)} candles to database")
+            logger.info(f"Saved {len(candles)} {timeframe} candles to database")
             
         except Exception as e:
             session.rollback()
@@ -90,28 +98,29 @@ class Database:
         finally:
             session.close()
 
-    def load_candles(self, start_time=None, end_time=None):
+    def load_candles(self, start_time=None, end_time=None, timeframe='15m'):
         try:
             if start_time and end_time:
                 # Use SQLAlchemy text with bound parameters
                 query = text("""
                     SELECT * FROM candles 
-                    WHERE timestamp >= :start_time AND timestamp <= :end_time 
+                    WHERE timestamp >= :start_time AND timestamp <= :end_time AND timeframe = :timeframe
                     ORDER BY timestamp ASC
                 """)
                 df = pd.read_sql(query, self.engine, params={
                     "start_time": start_time, 
-                    "end_time": end_time
+                    "end_time": end_time,
+                    "timeframe": timeframe
                 })
             else:
-                # Simple query without parameters
-                query = "SELECT * FROM candles ORDER BY timestamp ASC"
-                df = pd.read_sql(query, self.engine)
+                # Simple query without parameters but with timeframe filter
+                query = text("SELECT * FROM candles WHERE timeframe = :timeframe ORDER BY timestamp ASC")
+                df = pd.read_sql(query, self.engine, params={"timeframe": timeframe})
             
             if not df.empty:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
             
-            logger.info(f"Loaded {len(df)} candles from database")
+            logger.info(f"Loaded {len(df)} {timeframe} candles from database")
             return df
             
         except Exception as e:
@@ -141,10 +150,11 @@ class Database:
         finally:
             session.close()
 
-    def get_latest_candle_time(self):
+    def get_latest_candle_time(self, timeframe='15m'):
         try:
             session = self.get_session()
-            result = session.execute(text("SELECT MAX(timestamp) FROM candles")).scalar()
+            result = session.execute(text("SELECT MAX(timestamp) FROM candles WHERE timeframe = :timeframe"), 
+                                   {"timeframe": timeframe}).scalar()
             session.close()
             return result
         except Exception as e:
