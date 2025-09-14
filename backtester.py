@@ -56,14 +56,23 @@ class Backtester:
             
             logger.info(f"Starting backtest from {start_dt} to {end_dt}")
             
-            # Load historical data from database for specific timeframe
+            # Load historical data from database for specific timeframe (for signals)
             df = self.db.load_candles(start_dt, end_dt, self.timeframe)
             
             if df.empty:
                 logger.error("No historical data found for backtest period")
                 return []
             
-            logger.info(f"Loaded {len(df)} candles for backtest")
+            logger.info(f"Loaded {len(df)} {self.timeframe} candles for signal detection")
+            
+            # Load 1-minute data for precise TP/SL checking
+            df_1m = self.db.load_candles(start_dt, end_dt, '1m')
+            
+            if df_1m.empty:
+                logger.error("No 1-minute data found for TP/SL checking")
+                return []
+            
+            logger.info(f"Loaded {len(df_1m)} 1-minute candles for TP/SL precision")
             
             # Reset state
             self.active_orders = []
@@ -71,6 +80,7 @@ class Backtester:
             
             # Sort data by timestamp ASC for chronological processing
             df = df.sort_values('timestamp').reset_index(drop=True)
+            df_1m = df_1m.sort_values('timestamp').reset_index(drop=True)
             
             # Start backtesting loop from index 3 (need 3 lookback candles)
             current_index = 3
@@ -104,8 +114,8 @@ class Backtester:
                             else:
                                 self._place_order(signal, current_time)
                 
-                # Step 2: Check existing orders for TP/SL hits and timeouts
-                self._check_active_orders(current_candle)
+                # Step 2: Check existing orders for TP/SL hits and timeouts using 1-minute precision
+                self._check_active_orders_with_1m_precision(current_candle, df_1m)
                 
                 current_index += 1
             
@@ -121,8 +131,161 @@ class Backtester:
             logger.error(f"Error during backtest: {e}")
             return []
 
+    def _check_active_orders_with_1m_precision(self, current_candle, df_1m):
+        """
+        Check active orders for TP/SL hits using 1-minute precision ONLY (no fallback)
+        
+        Args:
+            current_candle: dict - Current main timeframe candle data  
+            df_1m: DataFrame - 1-minute data for precise TP/SL checking
+        """
+        if not self.active_orders:
+            return
+            
+        orders_to_remove = []
+        current_time = current_candle['timestamp']
+        
+        # Calculate the timeframe duration for determining 1m range
+        timeframe_minutes = self._get_timeframe_minutes(self.timeframe)
+        
+        for order in self.active_orders:
+            # Check for time-based timeout first (if enabled)
+            if TIMEOUT_HOURS > 0:
+                order_age_hours = (current_time - order['entry_time']).total_seconds() / 3600
+                if order_age_hours >= TIMEOUT_HOURS:
+                    # Order timed out
+                    exit_price = current_candle['close']
+                    pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+                    pnl_percentage = calculate_pnl_percentage(order['entry_price'], exit_price, order['signal_type'])
+                    
+                    # Determine if it would have been a win or loss based on exit price vs TP
+                    if order['signal_type'] == 'LONG':
+                        result = 'WIN' if exit_price >= order['tp_price'] else 'LOSS'
+                    else:  # SHORT
+                        result = 'WIN' if exit_price <= order['tp_price'] else 'LOSS'
+                    
+                    completed_order = {
+                        'entry_time': order['entry_time'],
+                        'exit_time': current_time,
+                        'signal_type': order['signal_type'],
+                        'condition': order['condition'],
+                        'entry_price': order['entry_price'],
+                        'exit_price': exit_price,
+                        'tp_price': order['tp_price'],
+                        'sl_price': order['sl_price'],
+                        'hit_type': 'TIMEOUT',
+                        'pnl': pnl,
+                        'pnl_percentage': pnl_percentage,
+                        'result': result,
+                        'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60)
+                    }
+                    
+                    self.completed_orders.append(completed_order)
+                    orders_to_remove.append(order)
+                    
+                    logger.info(f"TIMEOUT trade: {order['signal_type']} from {order['entry_time']} "
+                               f"timed out at {current_time} after {order_age_hours:.1f}h, PnL: ${pnl:.4f}")
+                    continue
+            
+            # Check for TP/SL hits using 1-minute precision ONLY
+            # Skip orders placed at current time (they should be checked in next iteration)
+            if order['entry_time'] >= current_time:
+                continue  # Skip orders placed at or after current time
+            
+            # Get 1-minute candles between previous timeframe candle and current candle
+            start_1m = current_time - timedelta(minutes=timeframe_minutes)
+            end_1m = current_time
+            
+            # Filter 1-minute candles for this period (no look-ahead bias)
+            mask_1m = (df_1m['timestamp'] > start_1m) & (df_1m['timestamp'] <= end_1m)
+            period_1m_candles = df_1m[mask_1m]
+            
+            hit_found = False
+            
+            # Check each 1-minute candle in this period chronologically (NO fallback)
+            for _, candle_1m in period_1m_candles.iterrows():
+                # Only process 1m candles that occur after the order was placed
+                if candle_1m['timestamp'] <= order['entry_time']:
+                    continue
+                    
+                hit_type, exit_price = check_tp_sl_hit(
+                    candle_1m.to_dict(), 
+                    order['tp_price'], 
+                    order['sl_price'], 
+                    order['signal_type']
+                )
+                
+                if hit_type:
+                    # Order hit TP or SL on this 1-minute candle
+                    pnl = calculate_pnl(order['entry_price'], exit_price, order['signal_type'])
+                    pnl_percentage = calculate_pnl_percentage(order['entry_price'], exit_price, order['signal_type'])
+                    result = 'WIN' if hit_type == 'TP' else 'LOSS'
+                    
+                    # Use the precise 1-minute timestamp for exit_time
+                    exit_time_precise = candle_1m['timestamp']
+                    
+                    # Create completed order record
+                    completed_order = {
+                        'entry_time': order['entry_time'],
+                        'exit_time': exit_time_precise,
+                        'signal_type': order['signal_type'],
+                        'condition': order['condition'],
+                        'entry_price': order['entry_price'],
+                        'exit_price': exit_price,
+                        'tp_price': order['tp_price'],
+                        'sl_price': order['sl_price'],
+                        'hit_type': hit_type,
+                        'pnl': pnl,
+                        'pnl_percentage': pnl_percentage,
+                        'result': result,
+                        'duration_minutes': int((exit_time_precise - order['entry_time']).total_seconds() / 60)
+                    }
+                    
+                    self.completed_orders.append(completed_order)
+                    orders_to_remove.append(order)
+                    
+                    logger.info(f"{result} trade: {order['signal_type']} from {order['entry_time']} "
+                               f"hit {hit_type} at {exit_time_precise} (1m precision), PnL: ${pnl:.4f}")
+                    
+                    hit_found = True
+                    break  # Exit 1m loop once we find a hit
+            
+            # Continue to next order (no fallback to main timeframe)
+        
+        # Remove completed orders from active list
+        for order in orders_to_remove:
+            self.active_orders.remove(order)
+
+    def _get_timeframe_minutes(self, timeframe_str):
+        """
+        Convert timeframe string to minutes
+        
+        Args:
+            timeframe_str: str - Timeframe like '1m', '5m', '15m', '30m', '1h', '4h', '1d'
+            
+        Returns:
+            int: Number of minutes
+        """
+        timeframe_minutes = {
+            '1m': 1,
+            '5m': 5,
+            '15m': 15,
+            '30m': 30,
+            '1h': 60,
+            '4h': 240,
+            '1d': 1440
+        }
+        
+        minutes = timeframe_minutes.get(timeframe_str.lower())
+        if minutes is None:
+            logger.warning(f"Unknown timeframe {timeframe_str}, using 15 minutes")
+            return 15
+        
+        return minutes
+
     def _check_active_orders(self, current_candle):
         """
+        DEPRECATED: Original method kept for backward compatibility
         Check active orders against current candle for TP/SL hits and timeouts
         
         Args:
