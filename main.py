@@ -267,18 +267,21 @@ def handle_status_command(args):
         else:
             print("No data in database")
         
-        # Test API connection
-        print("\nAPI STATUS:")
-        if crawler.api_client.test_connection():
-            rate_status = crawler.api_client.get_rate_limit_status()
-            usage_info = crawler.api_client.get_api_usage()
-            print(f"Twelve Data API: Connected")
-            print(f"Symbol: {crawler.api_client.symbol}")
-            print(f"Rate limit: {rate_status['remaining_calls']}/{rate_status['limit_per_minute']} calls remaining")
-            if usage_info:
-                print(f"API Usage: {usage_info.get('current_usage', 0)}/{usage_info.get('plan_limit', 'Unknown')}")
-        else:
-            print("Twelve Data API: Connection failed")
+        # Test MT5 connection (replaced API connection test)
+        print("\nMT5 STATUS:")
+        try:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                print("MetaTrader5: Connected")
+                account_info = mt5.account_info()
+                if account_info:
+                    print(f"Account: {account_info.login}")
+                    print(f"Server: {account_info.server}")
+                mt5.shutdown()
+            else:
+                print("MetaTrader5: Connection failed")
+        except ImportError:
+            print("MetaTrader5: Not available (library not installed or not on Windows)")
         
         # Test database connection
         print("\nDATABASE STATUS:")
