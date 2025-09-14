@@ -22,8 +22,8 @@ BACKTEST_END_DATE = os.getenv("BACKTEST_END_DATE", "2024-12-31 23:59:59")
 TP_AMOUNT = float(os.getenv("TP_AMOUNT", 6.0))
 SL_AMOUNT = float(os.getenv("SL_AMOUNT", 3.0))
 
-# Timeframe in minutes
-TIMEFRAME = int(os.getenv("TIMEFRAME", 15))
+# Default timeframe string for new timeframe system
+DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "15m")
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

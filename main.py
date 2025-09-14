@@ -7,7 +7,7 @@ from data_crawler import DataCrawler
 from signal_detector import SignalDetector
 from backtester import Backtester
 from models import Database
-from config import CRAWL_START_DATE, CRAWL_END_DATE, BACKTEST_START_DATE, BACKTEST_END_DATE
+from config import CRAWL_START_DATE, CRAWL_END_DATE, BACKTEST_START_DATE, BACKTEST_END_DATE, DEFAULT_TIMEFRAME
 from logger import setup_logger
 from utils import create_directories, parse_datetime
 
@@ -22,11 +22,12 @@ def setup_parser():
 Examples:
   %(prog)s migrate  # Initialize database schema
   %(prog)s reset --confirm  # Reset database (WARNING: deletes all data)
-  %(prog)s crawl --start-date "2024-01-01 00:00:00" --end-date "2024-12-31 23:59:59"
-  %(prog)s crawl --incremental
+  %(prog)s crawl --start-date "2024-01-01 00:00:00" --end-date "2024-12-31 23:59:59" --timeframe 15m
+  %(prog)s crawl --incremental --timeframe 1h  # Crawl new 1H data
+  %(prog)s crawl --timeframe 4h  # Crawl 4H data using config dates
   %(prog)s detect --start-date "2024-06-01 00:00:00" --end-date "2024-06-30 23:59:59"
-  %(prog)s backtest --start-date "2024-01-01 00:00:00" --end-date "2024-12-31 23:59:59"
-  %(prog)s backtest  # Uses dates from .env file
+  %(prog)s backtest --start-date "2024-01-01 00:00:00" --end-date "2024-12-31 23:59:59" --timeframe 15m
+  %(prog)s backtest --timeframe 1h  # Backtest 1H data using config dates
   %(prog)s status  # Show system status
         """
     )
@@ -34,9 +35,10 @@ Examples:
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
     # Crawl command
-    crawl_parser = subparsers.add_parser('crawl', help='Crawl historical OHLCV data from Finnhub API')
+    crawl_parser = subparsers.add_parser('crawl', help='Crawl historical OHLCV data from MetaTrader5')
     crawl_parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD HH:MM:SS)')
     crawl_parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD HH:MM:SS)')
+    crawl_parser.add_argument('--timeframe', type=str, default=DEFAULT_TIMEFRAME, help=f'Timeframe to crawl (1m, 5m, 15m, 30m, 1h, 4h, 1d). Default: {DEFAULT_TIMEFRAME}')
     crawl_parser.add_argument('--incremental', action='store_true', help='Crawl only new data since last update')
     crawl_parser.add_argument('--validate', action='store_true', help='Validate data integrity after crawling')
     crawl_parser.add_argument('--fill-gaps', action='store_true', help='Fill data gaps found during validation')
@@ -51,6 +53,7 @@ Examples:
     backtest_parser = subparsers.add_parser('backtest', help='Run backtest with signal detection and trading simulation')
     backtest_parser.add_argument('--start-date', type=str, help='Backtest start date')
     backtest_parser.add_argument('--end-date', type=str, help='Backtest end date')
+    backtest_parser.add_argument('--timeframe', type=str, default=DEFAULT_TIMEFRAME, help=f'Timeframe for backtest data (1m, 5m, 15m, 30m, 1h, 4h, 1d). Default: {DEFAULT_TIMEFRAME}')
     backtest_parser.add_argument('--export', action='store_true', default=True, help='Export results to CSV (default: True)')
     
     # Status command
@@ -68,7 +71,7 @@ Examples:
 def handle_crawl_command(args):
     """Handle crawl command"""
     try:
-        crawler = DataCrawler()
+        crawler = DataCrawler(timeframe=args.timeframe)
         
         if args.incremental:
             logger.info("Starting incremental data crawl...")
@@ -189,9 +192,9 @@ def handle_backtest_command(args):
         start_date = args.start_date or BACKTEST_START_DATE
         end_date = args.end_date or BACKTEST_END_DATE
         
-        logger.info(f"Starting backtest from {start_date} to {end_date}")
+        logger.info(f"Starting backtest from {start_date} to {end_date} with {args.timeframe} timeframe")
         
-        backtester = Backtester()
+        backtester = Backtester(timeframe=args.timeframe)
         
         # Run backtest
         results = backtester.run_backtest(start_date, end_date)

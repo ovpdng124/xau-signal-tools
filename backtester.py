@@ -13,7 +13,7 @@ from utils import (
     print_backtest_summary,
     is_within_trading_hours
 )
-from config import TIMEFRAME, ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME, ENABLE_SINGLE_ORDER_MODE
+from config import ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME, ENABLE_SINGLE_ORDER_MODE
 from logger import setup_logger
 
 logger = setup_logger()

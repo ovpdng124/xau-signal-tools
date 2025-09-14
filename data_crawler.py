@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import sys
 from models import Database
-from config import TIMEFRAME
+# TIMEFRAME import removed - now using instance timeframe
 from logger import setup_logger
 from utils import parse_datetime
 
@@ -301,7 +301,8 @@ class DataCrawler:
             
             # Find gaps (missing candles)
             gaps = []
-            expected_interval = timedelta(minutes=TIMEFRAME)
+            timeframe_minutes = self._get_timeframe_minutes(self.timeframe)
+            expected_interval = timedelta(minutes=timeframe_minutes)
             
             for i in range(1, len(df)):
                 current_time = df.iloc[i]['timestamp']
@@ -315,10 +316,10 @@ class DataCrawler:
                     gaps.append({
                         'start': gap_start,
                         'end': gap_end,
-                        'duration_minutes': int((current_time - prev_time).total_seconds() / 60) - TIMEFRAME
+                        'duration_minutes': int((current_time - prev_time).total_seconds() / 60) - timeframe_minutes
                     })
             
-            total_expected = int((df.iloc[-1]['timestamp'] - df.iloc[0]['timestamp']).total_seconds() / (TIMEFRAME * 60)) + 1
+            total_expected = int((df.iloc[-1]['timestamp'] - df.iloc[0]['timestamp']).total_seconds() / (timeframe_minutes * 60)) + 1
             missing_candles = total_expected - len(df)
             completeness = (len(df) / total_expected) * 100 if total_expected > 0 else 0
             
