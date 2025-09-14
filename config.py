@@ -48,3 +48,8 @@ TRADE_END_TIME = os.getenv("TRADE_END_TIME", "23:00")  # Trading end time (HH:MM
 
 # Single Order Mode Configuration
 ENABLE_SINGLE_ORDER_MODE = os.getenv("ENABLE_SINGLE_ORDER_MODE", "false").lower() == "true"  # Enable single order at a time mode
+
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")  # Telegram bot token
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Telegram chat ID for notifications
+ENABLE_TELEGRAM_NOTIFICATIONS = os.getenv("ENABLE_TELEGRAM_NOTIFICATIONS", "false").lower() == "true"  # Enable/disable Telegram notifications

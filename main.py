@@ -7,9 +7,10 @@ from data_crawler import DataCrawler
 from signal_detector import SignalDetector
 from backtester import Backtester
 from models import Database
-from config import CRAWL_START_DATE, CRAWL_END_DATE, BACKTEST_START_DATE, BACKTEST_END_DATE, DEFAULT_TIMEFRAME
+from config import CRAWL_START_DATE, CRAWL_END_DATE, BACKTEST_START_DATE, BACKTEST_END_DATE, DEFAULT_TIMEFRAME, ENABLE_TELEGRAM_NOTIFICATIONS
 from logger import setup_logger
 from utils import create_directories, parse_datetime
+from telegram_utils import send_signal_notification, send_backtest_summary, test_telegram_connection
 
 logger = setup_logger()
 
@@ -147,6 +148,15 @@ def handle_detect_command(args):
             logger.info("No signals detected in the specified period")
             return True
         
+        # Send Telegram notifications for detected signals
+        if ENABLE_TELEGRAM_NOTIFICATIONS:
+            for signal in signals:
+                success = send_signal_notification(signal)
+                if success:
+                    logger.info(f"Telegram notification sent for {signal['signal_type']} signal at {signal['timestamp']}")
+                else:
+                    logger.warning(f"Failed to send Telegram notification for signal at {signal['timestamp']}")
+        
         # Print signal summary
         print(f"\nDETECTED SIGNALS SUMMARY:")
         print(f"Total signals: {len(signals)}")
@@ -160,7 +170,7 @@ def handle_detect_command(args):
         print(f"SHORT signals: {len(short_signals)}")
         print(f"Engulfing patterns: {len(engulfing_signals)}")
         print(f"Inside bar patterns: {len(inside_bar_signals)}")
-        
+
         # Export to CSV if requested
         if args.export:
             # Convert signals to export format
@@ -205,6 +215,14 @@ def handle_backtest_command(args):
         
         # Analyze results
         stats = backtester.analyze_results(results)
+        
+        # Send backtest summary to Telegram if enabled
+        if ENABLE_TELEGRAM_NOTIFICATIONS and stats:
+            success = send_backtest_summary(stats)
+            if success:
+                logger.info("Backtest summary sent to Telegram")
+            else:
+                logger.warning("Failed to send backtest summary to Telegram")
         
         # Export results if requested
         if args.export:
@@ -259,6 +277,16 @@ def handle_status_command(args):
             db.close()
         except Exception as e:
             print(f"PostgreSQL: Connection failed - {e}")
+        
+        # Test Telegram connection
+        print("\nTELEGRAM STATUS:")
+        if ENABLE_TELEGRAM_NOTIFICATIONS:
+            if test_telegram_connection():
+                print("Telegram Bot: Connected and working")
+            else:
+                print("Telegram Bot: Connection failed or not configured")
+        else:
+            print("Telegram Bot: Disabled in configuration")
         
         crawler.close()
         return True
