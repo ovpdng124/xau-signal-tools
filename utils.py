@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import os
 from config import TP_AMOUNT, SL_AMOUNT
@@ -264,3 +264,158 @@ def print_backtest_summary(results):
     print(f"Average Win: ${stats['avg_win']:.4f}")
     print(f"Average Loss: ${stats['avg_loss']:.4f}")
     print("="*50)
+
+# UTC+3 Timezone Utilities for MT5 Data Consistency
+MT5_TIMEZONE = timezone(timedelta(hours=3))  # UTC+3 (MetaTrader 5 timezone)
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7))  # UTC+7 (Vietnam timezone)
+
+def get_utc3_now():
+    """
+    Get current time in UTC+3 (MT5 timezone)
+    
+    Returns:
+        datetime: Current time in UTC+3
+    """
+    return datetime.now(MT5_TIMEZONE)
+
+def get_vietnam_now():
+    """
+    Get current time in UTC+7 (Vietnam timezone)
+    
+    Returns:
+        datetime: Current time in UTC+7
+    """
+    return datetime.now(VIETNAM_TIMEZONE)
+
+def convert_to_utc3(dt):
+    """
+    Convert datetime to UTC+3 timezone
+    
+    Args:
+        dt: datetime - Input datetime (naive or timezone-aware)
+        
+    Returns:
+        datetime: Datetime in UTC+3 timezone
+    """
+    if dt.tzinfo is None:
+        # Assume naive datetime is already in UTC+3
+        return dt.replace(tzinfo=MT5_TIMEZONE)
+    else:
+        # Convert to UTC+3
+        return dt.astimezone(MT5_TIMEZONE)
+
+def convert_to_vietnam_time(dt):
+    """
+    Convert datetime to Vietnam time (UTC+7)
+    
+    Args:
+        dt: datetime - Input datetime (naive or timezone-aware)
+        
+    Returns:
+        datetime: Datetime in UTC+7 timezone
+    """
+    if dt.tzinfo is None:
+        # Assume naive datetime is in UTC+3 (MT5 timezone)
+        dt = dt.replace(tzinfo=MT5_TIMEZONE)
+    
+    return dt.astimezone(VIETNAM_TIMEZONE)
+
+def format_dual_timezone(dt):
+    """
+    Format datetime to show both UTC+3 and Vietnam time
+    
+    Args:
+        dt: datetime - Input datetime
+        
+    Returns:
+        str: Formatted string with both timezones
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=MT5_TIMEZONE)
+    
+    utc3_time = dt.astimezone(MT5_TIMEZONE)
+    vietnam_time = dt.astimezone(VIETNAM_TIMEZONE)
+    
+    return f"{utc3_time.strftime('%H:%M:%S')} (UTC+3) | {vietnam_time.strftime('%H:%M:%S')} (VN)"
+
+def is_market_15min_interval(dt=None):
+    """
+    Check if the current time (or provided time) is at a 15-minute market interval
+    (00, 15, 30, 45 minutes)
+    
+    Args:
+        dt: datetime - Time to check (defaults to current UTC+3 time)
+        
+    Returns:
+        bool: True if at 15-minute interval, False otherwise
+    """
+    if dt is None:
+        dt = get_utc3_now()
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=MT5_TIMEZONE)
+    
+    # Convert to UTC+3 if not already
+    utc3_time = dt.astimezone(MT5_TIMEZONE)
+    
+    # Check if minutes are 00, 15, 30, or 45
+    return utc3_time.minute in [0, 15, 30, 45]
+
+def get_next_market_interval(dt=None):
+    """
+    Get the next 15-minute market interval time
+    
+    Args:
+        dt: datetime - Reference time (defaults to current UTC+3 time)
+        
+    Returns:
+        datetime: Next 15-minute interval in UTC+3
+    """
+    if dt is None:
+        dt = get_utc3_now()
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=MT5_TIMEZONE)
+    
+    # Convert to UTC+3 if not already
+    utc3_time = dt.astimezone(MT5_TIMEZONE)
+    
+    # Calculate next 15-minute interval
+    current_minute = utc3_time.minute
+    
+    if current_minute < 15:
+        next_minute = 15
+    elif current_minute < 30:
+        next_minute = 30
+    elif current_minute < 45:
+        next_minute = 45
+    else:
+        # Next hour, 00 minutes
+        next_minute = 0
+        utc3_time = utc3_time + timedelta(hours=1)
+    
+    # Set to exact interval time
+    next_interval = utc3_time.replace(minute=next_minute, second=0, microsecond=0)
+    
+    return next_interval
+
+def seconds_until_next_market_interval(dt=None):
+    """
+    Calculate seconds until next 15-minute market interval
+    
+    Args:
+        dt: datetime - Reference time (defaults to current UTC+3 time)
+        
+    Returns:
+        int: Seconds until next interval
+    """
+    if dt is None:
+        dt = get_utc3_now()
+    
+    next_interval = get_next_market_interval(dt)
+    
+    # Ensure both times are timezone-aware and in same timezone
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=MT5_TIMEZONE)
+    
+    dt = dt.astimezone(MT5_TIMEZONE)
+    
+    return int((next_interval - dt).total_seconds())

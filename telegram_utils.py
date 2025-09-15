@@ -13,6 +13,7 @@ import urllib.error
 from datetime import datetime
 from logger import setup_logger
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from utils import format_dual_timezone, convert_to_utc3
 
 logger = setup_logger()
 
@@ -110,11 +111,16 @@ class TelegramNotifier:
             entry_price = signal_data.get('entry_price', 0)
             timestamp = signal_data.get('timestamp', datetime.now())
             
-            # Format timestamp
+            # Format timestamp with dual timezone
             if isinstance(timestamp, str):
-                time_str = timestamp
+                try:
+                    # Try to parse and format with timezone info
+                    dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                    time_str = format_dual_timezone(convert_to_utc3(dt))
+                except:
+                    time_str = timestamp  # Fallback to original string
             else:
-                time_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                time_str = format_dual_timezone(convert_to_utc3(timestamp))
             
             # Create signal message
             emoji = "🟢" if signal_type == "LONG" else "🔴"
@@ -126,7 +132,7 @@ class TelegramNotifier:
 🎯 <b>Direction:</b> {signal_type}
 📊 <b>Pattern:</b> {condition}
 💰 <b>Entry Price:</b> ${entry_price:.2f}
-🕐 <b>Time (UTC+3):</b> {time_str}
+🕐 <b>Time:</b> {time_str}
             """.strip()
             
             return self.send_message(message)
@@ -259,7 +265,7 @@ class TelegramNotifier:
             }
             
             emoji = level_emojis.get(level.upper(), "ℹ️")
-            timestamp = datetime.now().strftime('%H:%M:%S')
+            timestamp = format_dual_timezone(convert_to_utc3(datetime.now()))
             
             formatted_message = f"""
 {emoji} <b>System {level}</b>
@@ -287,7 +293,7 @@ class TelegramNotifier:
 
 ✅ Telegram bot connection test successful!
 
-🕐 <i>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>
+🕐 <i>{format_dual_timezone(convert_to_utc3(datetime.now()))}</i>
         """.strip()
         
         success = self.send_message(test_message)

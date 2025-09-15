@@ -423,6 +423,11 @@ def handle_daemon_command(args):
                 print(f"Uptime: {status.get('uptime', 'Unknown')}")
                 print(f"Last Activity: {status.get('message', 'Unknown')}")
                 
+                # Display current time in both timezones
+                if 'current_time' in status:
+                    time_info = status['current_time']
+                    print(f"Current Time: {time_info.get('dual_format', 'Unknown')}")
+                
                 if 'config' in status:
                     config = status['config']
                     print(f"\nConfiguration:")
@@ -430,6 +435,7 @@ def handle_daemon_command(args):
                     print(f"  Auto Detect: {'Enabled' if config.get('auto_detect_enabled') else 'Disabled'}")
                     print(f"  Telegram: {'Enabled' if config.get('telegram_enabled') else 'Disabled'}")
                     print(f"  Timeframe: {config.get('timeframe', 'Unknown')}")
+                    print(f"  Timezone: UTC+3 (MT5 Market Time)")
                 
             elif status['status'] == 'stopped':
                 print(f"Status: 🔴 {status['status'].upper()}")

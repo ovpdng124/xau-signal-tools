@@ -22,6 +22,7 @@ import sys
 import time
 import signal
 import threading
+import schedule
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
@@ -32,10 +33,10 @@ from models import Database
 from telegram_utils import send_signal_notification, send_system_notification
 from config import (
     SCHEDULER_ENABLED, CRAWL_INTERVAL_MINUTES, AUTO_DETECT_ENABLED, 
-    HEALTH_CHECK_INTERVAL_MINUTES, DEFAULT_TIMEFRAME, ENABLE_TELEGRAM_NOTIFICATIONS
+    DEFAULT_TIMEFRAME, ENABLE_TELEGRAM_NOTIFICATIONS
 )
 from logger import setup_logger
-from utils import parse_datetime
+from utils import get_utc3_now, convert_to_vietnam_time, format_dual_timezone
 
 logger = setup_logger()
 
@@ -83,7 +84,7 @@ class DaemonScheduler:
             
             # Start daemon
             self.running = True
-            self.stats['started_at'] = datetime.now().isoformat()
+            self.stats['started_at'] = get_utc3_now().isoformat()
             
             logger.info("🚀 XAU Signal Daemon started")
             if ENABLE_TELEGRAM_NOTIFICATIONS:
@@ -145,6 +146,13 @@ class DaemonScheduler:
             if self.is_running():
                 status_data['uptime'] = self._get_uptime()
                 status_data['stats'] = self.stats
+                # Add current time in both timezones
+                current_time = get_utc3_now()
+                status_data['current_time'] = {
+                    'utc3': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'vietnam': convert_to_vietnam_time(current_time).strftime('%Y-%m-%d %H:%M:%S'),
+                    'dual_format': format_dual_timezone(current_time)
+                }
             else:
                 status_data['status'] = 'stopped'
                 status_data['message'] = 'Process not found'
@@ -194,27 +202,34 @@ class DaemonScheduler:
             return False
     
     def _run_daemon_loop(self):
-        """Main daemon loop"""
-        self.last_health_check = datetime.now()
+        """Main daemon loop using schedule for precise timing"""
+        self.last_health_check = get_utc3_now()
+        
+        # Log startup time in both timezones
+        startup_time = get_utc3_now()
+        logger.info(f"Daemon loop started at {format_dual_timezone(startup_time)}")
+        
+        # Setup scheduled jobs for market intervals
+        schedule.every().hour.at(":00").do(self._scheduled_crawl)
+        schedule.every().hour.at(":15").do(self._scheduled_crawl) 
+        schedule.every().hour.at(":30").do(self._scheduled_crawl)
+        schedule.every().hour.at(":45").do(self._scheduled_crawl)
+        
+        # Health check every 30 minutes
+        schedule.every(30).minutes.do(self._scheduled_health_check)
+        
+        # Status update every 30 seconds (separate from crawl timing)
+        schedule.every(30).seconds.do(self._update_daemon_status)
+        
+        logger.info("📅 Scheduled jobs: XX:00, XX:15, XX:30, XX:45 for crawling")
         
         while self.running:
             try:
-                current_time = datetime.now()
+                # Run scheduled jobs (no other logic here to avoid delay)
+                schedule.run_pending()
                 
-                # Check if it's time to crawl
-                if self._should_crawl(current_time):
-                    self._execute_crawl_cycle()
-                
-                # Perform health check
-                if self._should_health_check(current_time):
-                    self._perform_health_check()
-                    self.last_health_check = current_time
-                
-                # Update status
-                self._update_status("running", f"Last activity: {current_time.strftime('%H:%M:%S')}")
-                
-                # Sleep for 30 seconds before next check
-                time.sleep(30)
+                # Sleep 1 seconds - faster response, schedule handles precision
+                time.sleep(1)
                 
             except Exception as e:
                 logger.error(f"Error in daemon loop: {e}")
@@ -226,27 +241,42 @@ class DaemonScheduler:
                 # Continue running despite errors
                 time.sleep(60)  # Wait longer after error
     
-    def _should_crawl(self, current_time):
-        """Check if it's time to perform crawl cycle"""
-        if self.last_crawl_time is None:
-            return True  # First run
-        
-        time_since_last_crawl = current_time - self.last_crawl_time
-        return time_since_last_crawl.total_seconds() >= (CRAWL_INTERVAL_MINUTES * 60)
+    def _scheduled_crawl(self):
+        """Scheduled crawl job - runs at market intervals"""
+        try:
+            current_time = get_utc3_now()
+            logger.info(f"🔄 Scheduled crawl triggered at {format_dual_timezone(current_time)}")
+            
+            self._execute_crawl_cycle()
+            
+        except Exception as e:
+            logger.error(f"Error in scheduled crawl: {e}")
+            self.stats['errors'] += 1
     
-    def _should_health_check(self, current_time):
-        """Check if it's time to perform health check"""
-        if self.last_health_check is None:
-            return True
-        
-        time_since_health_check = current_time - self.last_health_check
-        return time_since_health_check.total_seconds() >= (HEALTH_CHECK_INTERVAL_MINUTES * 60)
+    def _scheduled_health_check(self):
+        """Scheduled health check job"""
+        try:
+            logger.info("🏥 Scheduled health check triggered")
+            self._perform_health_check()
+            self.last_health_check = get_utc3_now()
+        except Exception as e:
+            logger.error(f"Error in scheduled health check: {e}")
+    
+    def _update_daemon_status(self):
+        """Scheduled status update job"""
+        try:
+            current_time = get_utc3_now()
+            time_display = format_dual_timezone(current_time)
+            self._update_status("running", f"Last activity: {time_display}")
+        except Exception as e:
+            logger.error(f"Error updating daemon status: {e}")
+    
     
     def _execute_crawl_cycle(self):
         """Execute complete crawl and detection cycle"""
         try:
-            cycle_start = datetime.now()
-            logger.info(f"🔄 Starting scheduled crawl cycle at {cycle_start.strftime('%H:%M:%S')}")
+            cycle_start = get_utc3_now()
+            logger.info(f"🔄 Starting scheduled crawl cycle at {format_dual_timezone(cycle_start)}")
             
             # Step 1: Incremental crawl
             crawl_success = self._perform_incremental_crawl()
@@ -264,7 +294,7 @@ class DaemonScheduler:
             self.stats['total_crawls'] += 1
             self.stats['last_crawl'] = cycle_start.isoformat()
             
-            cycle_duration = (datetime.now() - cycle_start).total_seconds()
+            cycle_duration = (get_utc3_now() - cycle_start).total_seconds()
             logger.info(f"✅ Crawl cycle completed in {cycle_duration:.1f} seconds")
             
         except Exception as e:
@@ -277,11 +307,7 @@ class DaemonScheduler:
         try:
             logger.info("📊 Performing incremental data crawl")
             
-            # Calculate crawl period (last N minutes + buffer)
-            end_time = datetime.now()
-            start_time = end_time - timedelta(minutes=CRAWL_INTERVAL_MINUTES + 5)  # 5min buffer
-            
-            # Perform incremental crawl
+            # Perform incremental crawl (crawler handles timing internally)
             success = self.crawler.crawl_incremental_data()
             
             if success:
@@ -296,17 +322,23 @@ class DaemonScheduler:
             return False
     
     def _perform_auto_detection(self):
-        """Perform signal detection on recently crawled data"""
+        """Perform signal detection on newly closed candle"""
         try:
             logger.info("🔍 Performing auto signal detection")
             
-            # Load recent data (last 10 candles for pattern detection)
-            end_time = datetime.now()
+            # Load recent 10 candles for pattern detection (enough for lookback)
+            end_time = get_utc3_now().replace(tzinfo=None)
             start_time = end_time - timedelta(hours=3)  # 3 hours buffer for pattern detection
             
+            # Convert to string format for database query
+            start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
+            end_time_str = end_time.strftime('%Y-%m-%d %H:%M:%S')
+            
+            logger.info(f"Loading data from {format_dual_timezone(start_time)} to {format_dual_timezone(end_time)}")
+            
             df = self.db.load_candles(
-                start_time.strftime('%Y-%m-%d %H:%M:%S'),
-                end_time.strftime('%Y-%m-%d %H:%M:%S'),
+                start_time_str,
+                end_time_str,
                 DEFAULT_TIMEFRAME
             )
             
@@ -317,29 +349,34 @@ class DaemonScheduler:
             # Sort by timestamp DESC and limit to recent candles
             df = df.sort_values('timestamp', ascending=False).head(10).reset_index(drop=True)
             
-            # Detect signals (only on the most recent data)
-            signals = self.detector.scan_for_signals(df, start_index=3)
+            if len(df) < 4:
+                logger.warning("Not enough candles for signal detection (need at least 4)")
+                return []
             
-            # Filter signals from the last crawl period only
-            recent_signals = []
-            cutoff_time = datetime.now() - timedelta(minutes=CRAWL_INTERVAL_MINUTES + 2)
+            # Detect signal ONLY on the latest closed candle (index 3 for proper lookback)
+            # Index 0 = N0 (current/incomplete), Index 1 = N1 (latest closed), Index 2 = N2, Index 3 = N3
+            # We scan from index 3 to check N1,N2,N3 pattern but only get 1 signal max
+            signals = self.detector.scan_for_signals(df, start_index=3, end_index=3)
             
-            for signal in signals:
-                signal_time = signal['timestamp']
-                if isinstance(signal_time, str):
-                    signal_time = parse_datetime(signal_time)
+            # Should only have max 1 signal since we check only 1 candle position
+            if signals:
+                latest_signal = signals[0]  # Take first (should be only one)
                 
-                if signal_time >= cutoff_time:
-                    recent_signals.append(signal)
-            
-            if recent_signals:
-                logger.info(f"🎯 Found {len(recent_signals)} new signals")
-                self.stats['total_signals'] += len(recent_signals)
-                self.stats['last_signal'] = datetime.now().isoformat()
+                # ĐẶC BIỆT QUAN TRỌNG: Set entry_time = current time (notification time)
+                entry_time_utc3 = get_utc3_now()
+                latest_signal['entry_time'] = entry_time_utc3.replace(tzinfo=None)
+                latest_signal['entry_time_str'] = format_dual_timezone(entry_time_utc3)
+                
+                logger.info(f"🎯 Signal detected at {format_dual_timezone(latest_signal['timestamp'])}: {latest_signal['signal_type']} - {latest_signal['condition']}")
+                logger.info(f"📍 Entry time (notification time): {latest_signal['entry_time_str']}")
+                
+                self.stats['total_signals'] += 1
+                self.stats['last_signal'] = entry_time_utc3.isoformat()
+                
+                return [latest_signal]
             else:
-                logger.info("No new signals detected")
-            
-            return recent_signals
+                logger.info("No signal detected on latest closed candle")
+                return []
             
         except Exception as e:
             logger.error(f"Auto detection failed: {e}")
@@ -407,7 +444,7 @@ class DaemonScheduler:
             status_data = {
                 'status': status,
                 'message': message,
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': get_utc3_now().isoformat(),
                 'pid': os.getpid(),
                 'config': {
                     'crawl_interval_minutes': CRAWL_INTERVAL_MINUTES,
@@ -428,7 +465,7 @@ class DaemonScheduler:
         try:
             if self.stats['started_at']:
                 started = datetime.fromisoformat(self.stats['started_at'])
-                uptime_seconds = (datetime.now() - started).total_seconds()
+                uptime_seconds = (get_utc3_now() - started).total_seconds()
                 
                 hours = int(uptime_seconds // 3600)
                 minutes = int((uptime_seconds % 3600) // 60)

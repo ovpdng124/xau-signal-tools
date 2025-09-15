@@ -4,7 +4,7 @@ import sys
 from models import Database
 # TIMEFRAME import removed - now using instance timeframe
 from logger import setup_logger
-from utils import parse_datetime
+from utils import parse_datetime, get_utc3_now
 
 logger = setup_logger()
 
@@ -49,6 +49,43 @@ class DataCrawler:
             return mt5.TIMEFRAME_M15
         
         return mt5_timeframe
+    
+    def _get_last_closed_candle_time(self, timeframe):
+        """
+        Get timestamp of last closed candle based on current UTC+3 time
+        ĐẶC BIỆT QUAN TRỌNG: Chỉ trả về thời gian của nến ĐÃ ĐÓNG
+        
+        Example:
+        - Current time: 15:17 UTC+3
+        - For 15m timeframe: Last closed = 15:00 (nến 15:15 vẫn đang chạy)
+        - For 1h timeframe: Last closed = 15:00 (nến 15:00-16:00 vẫn đang chạy)
+        """
+        current_time = get_utc3_now().replace(tzinfo=None)
+        timeframe_minutes = self._get_timeframe_minutes(timeframe)
+        
+        # Calculate how many minutes since start of day
+        minutes_since_midnight = current_time.hour * 60 + current_time.minute
+        
+        # Find the last completed interval
+        completed_intervals = minutes_since_midnight // timeframe_minutes
+        last_closed_minute = completed_intervals * timeframe_minutes
+        
+        # Convert back to hours and minutes
+        last_closed_hour = last_closed_minute // 60
+        last_closed_min = last_closed_minute % 60
+        
+        # Create timestamp for last closed candle
+        last_closed_time = current_time.replace(
+            hour=last_closed_hour, 
+            minute=last_closed_min, 
+            second=0, 
+            microsecond=0
+        )
+        
+        logger.info(f"Current time: {current_time.strftime('%H:%M:%S')} UTC+3")
+        logger.info(f"Last closed {timeframe} candle: {last_closed_time.strftime('%H:%M:%S')} UTC+3")
+        
+        return last_closed_time
 
     def _get_timeframe_minutes(self, timeframe_str):
         """Convert timeframe string to minutes"""
@@ -127,11 +164,11 @@ class DataCrawler:
             else:
                 end_dt = end_date
             
-            # Ensure timezone info
+            # Ensure timezone info - use UTC+3 (MT5 timezone)
             if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+                start_dt = start_dt.replace(tzinfo=get_utc3_now().tzinfo)
             if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+                end_dt = end_dt.replace(tzinfo=get_utc3_now().tzinfo)
             
             logger.info(f"✓ Getting {self.symbol} data from {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')} ({self.timeframe})")
             
@@ -243,9 +280,12 @@ class DataCrawler:
             # Calculate start time for incremental crawl (add one timeframe to avoid duplicate)
             timeframe_minutes = self._get_timeframe_minutes(self.timeframe)
             start_time = latest_time + timedelta(minutes=timeframe_minutes)
-            end_time = datetime.now()
+            
+            # ĐẶC BIỆT QUAN TRỌNG: Chỉ crawl đến nến ĐÃ ĐÓNG
+            end_time = self._get_last_closed_candle_time(self.timeframe)
             
             logger.info(f"Starting MT5 incremental data crawl from {start_time} to {end_time}")
+            logger.info(f"⚠️ Only crawling CLOSED candles - current incomplete candle will be ignored")
             
             # Get new data from MT5
             df = self._get_mt5_data(start_time, end_time)

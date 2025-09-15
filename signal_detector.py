@@ -216,13 +216,14 @@ class SignalDetector:
             'body_range': body_range
         }
 
-    def scan_for_signals(self, df, start_index=3):
+    def scan_for_signals(self, df, start_index=3, end_index=None):
         """
         Scan DataFrame for signals starting from specified index
         
         Args:
             df: DataFrame - OHLCV data sorted by timestamp DESC (latest first)
             start_index: int - Starting index (default 3 for lookback 3)
+            end_index: int - Ending index (default None = scan all from start_index)
             
         Returns:
             list: List of detected signals
@@ -233,8 +234,14 @@ class SignalDetector:
             logger.warning(f"Not enough data for signal detection. Need at least {start_index + 1} candles, got {len(df)}")
             return signals
         
-        # Iterate through DataFrame starting from index 3 (to have lookback 1,2,3 available)
-        for i in range(start_index, len(df)):
+        # Determine end point for scanning
+        if end_index is None:
+            end_point = len(df)
+        else:
+            end_point = min(end_index + 1, len(df))  # +1 because range is exclusive
+        
+        # Iterate through DataFrame starting from start_index to end_point
+        for i in range(start_index, end_point):
             # Get the three lookback candles
             # Note: df is sorted DESC, so index 0 is latest
             n3 = df.iloc[i-3].to_dict()  # lookback 1 (most recent)
