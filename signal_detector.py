@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from utils import is_green_candle, is_red_candle, get_candle_body_range, get_candle_amplitude_percentage
 from logger import setup_logger
 
@@ -35,7 +35,7 @@ class SignalDetector:
                 'signal_type': engulfing_signal,
                 'condition': 'ENGULFING',
                 'entry_price': n3['close'],  # Entry at N3 close price
-                'timestamp': n3['timestamp'],
+                'timestamp': n3['timestamp'] + timedelta(minutes=15),
                 'details': {
                     'engulfing_n1': self._candle_info(n2),  # N2 is N1 for engulfing
                     'engulfing_n2': self._candle_info(n3),  # N3 is N2 for engulfing
@@ -50,7 +50,7 @@ class SignalDetector:
                 'signal_type': inside_bar_signal,
                 'condition': 'INSIDE_BAR',
                 'entry_price': n3['close'],  # Entry at N3 close price
-                'timestamp': n3['timestamp'],
+                'timestamp': n3['timestamp'] + timedelta(minutes=15),
                 'details': {
                     'inside_n1': self._candle_info(n1),  # N1 for inside bar
                     'inside_n2': self._candle_info(n2),  # N2 for inside bar
