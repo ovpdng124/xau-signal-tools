@@ -374,11 +374,11 @@ def handle_daemon_command(args):
         daemon = DaemonScheduler()
         
         if args.daemon_action == 'start':
-            print("🚀 Starting XAU Signal Daemon...")
+            print("Starting XAU Signal Daemon...")
             
             # Check if already running
             if daemon.is_running():
-                print("❌ Daemon is already running!")
+                print("Daemon is already running!")
                 print("Use 'python main.py daemon status' to check status")
                 print("Use 'python main.py daemon stop' to stop it first")
                 return False
@@ -387,38 +387,38 @@ def handle_daemon_command(args):
             success = daemon.start()
             
             if success:
-                print("✅ Daemon started successfully!")
+                print("Daemon started successfully!")
                 print("Use 'python main.py daemon status' to monitor")
                 print("Use 'python main.py daemon logs' to view logs")
             else:
-                print("❌ Failed to start daemon. Check logs for details.")
+                print("Failed to start daemon. Check logs for details.")
             
             return success
             
         elif args.daemon_action == 'stop':
-            print("🛑 Stopping XAU Signal Daemon...")
-            
+            print("Stopping XAU Signal Daemon...")
+
             if not daemon.is_running():
-                print("⚠️ Daemon is not running")
+                print("Daemon is not running")
                 return True
-            
+
             success = daemon.stop()
-            
+
             if success:
-                print("✅ Daemon stopped successfully!")
+                print("Daemon stopped successfully!")
             else:
-                print("❌ Failed to stop daemon")
+                print("Failed to stop daemon")
             
             return success
             
         elif args.daemon_action == 'status':
             status = daemon.status()
             
-            print("\n📊 XAU Signal Daemon Status")
+            print("\nXAU Signal Daemon Status")
             print("=" * 40)
-            
+
             if status['status'] == 'running':
-                print(f"Status: 🟢 {status['status'].upper()}")
+                print(f"Status: {status['status'].upper()}")
                 print(f"PID: {status.get('pid', 'Unknown')}")
                 print(f"Uptime: {status.get('uptime', 'Unknown')}")
                 print(f"Last Activity: {status.get('message', 'Unknown')}")
@@ -438,9 +438,9 @@ def handle_daemon_command(args):
                     print(f"  Timezone: UTC+3 (MT5 Market Time)")
                 
             elif status['status'] == 'stopped':
-                print(f"Status: 🔴 {status['status'].upper()}")
+                print(f"Status: {status['status'].upper()}")
             else:
-                print(f"Status: ⚠️ {status['status'].upper()}")
+                print(f"Status: {status['status'].upper()}")
             
             print(f"Message: {status.get('message', 'No message')}")
             print(f"Last Check: {status.get('timestamp', 'Unknown')}")
@@ -448,7 +448,7 @@ def handle_daemon_command(args):
             return True
             
         elif args.daemon_action == 'logs':
-            print("📋 XAU Signal Daemon Logs")
+            print("XAU Signal Daemon Logs")
             print("=" * 40)
             print("Press Ctrl+C to exit log viewing\n")
             
@@ -479,11 +479,11 @@ def handle_daemon_command(args):
             
     except ImportError as e:
         logger.error(f"Failed to import scheduler module: {e}")
-        print("❌ Daemon functionality is not available")
+        print("Daemon functionality is not available")
         return False
     except Exception as e:
         logger.error(f"Error in daemon command: {e}")
-        print(f"❌ Daemon command failed: {e}")
+        print(f"Daemon command failed: {e}")
         return False
 
 def main():

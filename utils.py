@@ -266,8 +266,18 @@ def print_backtest_summary(results):
     print("="*50)
 
 # UTC+3 Timezone Utilities for MT5 Data Consistency
+UTC_TIMEZONE = timezone(timedelta(hours=0))  # UTC+0 (UTC timezone)
 MT5_TIMEZONE = timezone(timedelta(hours=3))  # UTC+3 (MetaTrader 5 timezone)
 VIETNAM_TIMEZONE = timezone(timedelta(hours=7))  # UTC+7 (Vietnam timezone)
+
+def get_utc_now():
+    """
+    Get current time in UTC+0 (UTC timezone)
+
+    Returns:
+        datetime: Current time in UTC+0
+    """
+    return datetime.now(UTC_TIMEZONE)
 
 def get_utc3_now():
     """

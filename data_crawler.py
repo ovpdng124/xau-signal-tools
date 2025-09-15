@@ -4,7 +4,7 @@ import sys
 from models import Database
 # TIMEFRAME import removed - now using instance timeframe
 from logger import setup_logger
-from utils import parse_datetime, get_utc3_now
+from utils import parse_datetime, get_utc3_now, get_utc_now
 
 logger = setup_logger()
 
@@ -164,11 +164,11 @@ class DataCrawler:
             else:
                 end_dt = end_date
             
-            # Ensure timezone info - use UTC+3 (MT5 timezone)
+            # Ensure timezone info - use UTC+0 (UTC timezone)
             if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=get_utc3_now().tzinfo)
+                start_dt = start_dt.replace(tzinfo=get_utc_now().tzinfo)
             if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=get_utc3_now().tzinfo)
+                end_dt = end_dt.replace(tzinfo=get_utc_now().tzinfo)
             
             logger.info(f"✓ Getting {self.symbol} data from {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')} ({self.timeframe})")
             
@@ -233,16 +233,32 @@ class DataCrawler:
             
             # Get data from MT5
             df = self._get_mt5_data(start_dt, end_dt)
-            
+
             if df is None or df.empty:
                 logger.error("Failed to fetch any data from MT5")
                 self._shutdown_mt5()
                 return False
-            
+
+            # ĐẶC BIỆT QUAN TRỌNG: Loại bỏ cây nến cuối cùng (luôn là cây nến hiện tại chưa đóng)
+            original_count = len(df)
+
+            if original_count > 0:
+                # Loại bỏ cây nến cuối cùng (chưa đóng)
+                df = df.iloc[:-1].copy()
+                filtered_count = len(df)
+
+                logger.info(f"⚠️ Filtered out last candle (current incomplete candle)")
+                logger.info(f"Original candles from MT5: {original_count}, Saving: {filtered_count}")
+
+            if df.empty:
+                logger.info("No closed candles to save after filtering")
+                self._shutdown_mt5()
+                return True
+
             # Save to database
             try:
                 self.db.save_candles(df, self.timeframe)
-                logger.info(f"Saved {len(df)} {self.timeframe} candles to database")
+                logger.info(f"Saved {len(df)} {self.timeframe} closed candles to database")
             except Exception as e:
                 logger.error(f"Failed to save candles to database: {e}")
                 self._shutdown_mt5()
@@ -271,22 +287,19 @@ class DataCrawler:
                 
             # Get the latest candle timestamp from database for this timeframe
             latest_time = self.db.get_latest_candle_time(self.timeframe)
-            
+
             if latest_time is None:
                 logger.warning(f"No existing {self.timeframe} data found. Use crawl_historical_data() instead.")
                 self._shutdown_mt5()
                 return False
-            
-            # Calculate start time for incremental crawl (add one timeframe to avoid duplicate)
-            timeframe_minutes = self._get_timeframe_minutes(self.timeframe)
-            start_time = latest_time + timedelta(minutes=timeframe_minutes)
-            
-            # ĐẶC BIỆT QUAN TRỌNG: Chỉ crawl đến nến ĐÃ ĐÓNG
-            end_time = self._get_last_closed_candle_time(self.timeframe)
-            
+
+            # ĐƠN GIẢN: start = latest DB timestamp, end = current time
+            start_time = latest_time
+            end_time = get_utc3_now().replace(tzinfo=None)
+
             logger.info(f"Starting MT5 incremental data crawl from {start_time} to {end_time}")
-            logger.info(f"⚠️ Only crawling CLOSED candles - current incomplete candle will be ignored")
-            
+            logger.info(f"⚠️ Will filter out last candle (current incomplete candle) before saving")
+
             # Get new data from MT5
             df = self._get_mt5_data(start_time, end_time)
             
@@ -299,7 +312,27 @@ class DataCrawler:
                 logger.info("No new data to crawl")
                 self._shutdown_mt5()
                 return True
-            
+
+            # ĐẶC BIỆT QUAN TRỌNG: Loại bỏ cây nến đầu (duplicate) và cây cuối (chưa đóng)
+            original_count = len(df)
+
+            if original_count > 1:
+                # Loại bỏ cây đầu (duplicate với DB) và cây cuối (chưa đóng)
+                df = df.iloc[1:-1].copy()
+                filtered_count = len(df)
+
+                logger.info(f"⚠️ Filtered out first candle (duplicate) and last candle (incomplete)")
+                logger.info(f"Original candles from MT5: {original_count}, Saving: {filtered_count}")
+            elif original_count == 1:
+                # Chỉ có 1 cây nến = cây nến duplicate trong DB
+                df = df.iloc[0:0].copy()  # Empty dataframe
+                logger.info(f"⚠️ Only 1 candle found - duplicate with existing DB record")
+
+            if df.empty:
+                logger.info("No new closed candles to save after filtering")
+                self._shutdown_mt5()
+                return True
+
             # Save new data to database
             self.db.save_candles(df, self.timeframe)
             logger.info(f"MT5 incremental crawl completed. Saved {len(df)} new {self.timeframe} candles")
