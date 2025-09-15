@@ -125,11 +125,12 @@ class TelegramNotifier:
             # Create signal message
             emoji = "🟢" if signal_type == "LONG" else "🔴"
             direction_emoji = "📈" if signal_type == "LONG" else "📉"
+            display_direction = "BUY" if signal_type == "LONG" else "SELL"
             
             message = f"""
 {emoji} <b>XAU/USD Trading Signal</b> {direction_emoji}
 
-🎯 <b>Direction:</b> {signal_type}
+🎯 <b>Direction:</b> {display_direction}
 📊 <b>Pattern:</b> {condition}
 💰 <b>Entry Price:</b> ${entry_price:.2f}
 🕐 <b>Time:</b> {time_str}
@@ -223,11 +224,12 @@ class TelegramNotifier:
                 color_emoji = "🔴"
             
             direction_emoji = "📈" if signal_type == "LONG" else "📉"
+            display_direction = "BUY" if signal_type == "LONG" else "SELL"
             
             message = f"""
 {result_emoji} <b>Trade Closed</b> {color_emoji}
 
-{direction_emoji} <b>{signal_type}</b> | <b>{result}</b>
+{direction_emoji} <b>{display_direction}</b> | <b>{result}</b>
 💰 <b>PnL:</b> ${pnl:.4f}
 
 📊 <b>Trade Details:</b>
