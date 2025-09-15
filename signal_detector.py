@@ -91,19 +91,19 @@ class SignalDetector:
                 logger.debug(f"Amplitude check failed for signal INSIDE_BAR: N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}% (all must be > 0.02%)")
                 return False
         
-        # Check amplitude differences > 0.01%
-        diff_12 = abs(amp1 - amp2)
-        diff_23 = abs(amp2 - amp3)
-        diff_13 = abs(amp1 - amp3)
-
-        if signal == 'engulfing':
-            if diff_23 < 0.01:
-                logger.debug(f"Amplitude difference check failed: diff_12={diff_23:.4f}% (all must be > 0.01%)")
-                return False
-        else:
-            if diff_12 < 0.01 or diff_23 < 0.01 or diff_13 < 0.01:
-                logger.debug(f"Amplitude difference check failed: diff_12={diff_12:.4f}%, diff_23={diff_23:.4f}%, diff_13={diff_13:.4f}% (all must be > 0.01%)")
-                return False
+        # Check amplitude differences > 0.01% - Tạm thời xóa, sau 2 phiên bản update ko xài nữa thì clear hẳn.
+        # diff_12 = abs(amp1 - amp2)
+        # diff_23 = abs(amp2 - amp3)
+        # diff_13 = abs(amp1 - amp3)
+        #
+        # if signal == 'engulfing':
+        #     if diff_23 < 0.01:
+        #         logger.debug(f"Amplitude difference check failed: diff_12={diff_23:.4f}% (all must be > 0.01%)")
+        #         return False
+        # else:
+        #     if diff_12 < 0.01 or diff_23 < 0.01 or diff_13 < 0.01:
+        #         logger.debug(f"Amplitude difference check failed: diff_12={diff_12:.4f}%, diff_23={diff_23:.4f}%, diff_13={diff_13:.4f}% (all must be > 0.01%)")
+        #         return False
         
         logger.debug(f"Prerequisites passed: Amplitudes N1={amp1:.4f}%, N2={amp2:.4f}%, N3={amp3:.4f}%")
         return True
