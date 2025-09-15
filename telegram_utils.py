@@ -13,7 +13,7 @@ import urllib.error
 from datetime import datetime
 from logger import setup_logger
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-from utils import format_dual_timezone, convert_to_utc3
+from utils import format_dual_timezone, convert_to_utc3, get_utc3_now
 
 logger = setup_logger()
 
@@ -109,7 +109,7 @@ class TelegramNotifier:
             signal_type = signal_data.get('signal_type', 'UNKNOWN')
             condition = signal_data.get('condition', 'UNKNOWN')
             entry_price = signal_data.get('entry_price', 0)
-            timestamp = signal_data.get('timestamp', datetime.now())
+            timestamp = signal_data.get('timestamp', get_utc3_now())
             
             # Format timestamp with dual timezone
             if isinstance(timestamp, str):
@@ -207,8 +207,8 @@ class TelegramNotifier:
             pnl = trade_data.get('pnl', 0)
             hit_type = trade_data.get('hit_type', 'UNKNOWN')
             duration_minutes = trade_data.get('duration_minutes', 0)
-            entry_time = trade_data.get('entry_time', datetime.now())
-            exit_time = trade_data.get('exit_time', datetime.now())
+            entry_time = trade_data.get('entry_time', get_utc3_now())
+            exit_time = trade_data.get('exit_time', get_utc3_now())
             
             # Format timestamps
             entry_str = entry_time.strftime('%H:%M:%S') if hasattr(entry_time, 'strftime') else str(entry_time)
@@ -265,7 +265,7 @@ class TelegramNotifier:
             }
             
             emoji = level_emojis.get(level.upper(), "ℹ️")
-            timestamp = format_dual_timezone(convert_to_utc3(datetime.now()))
+            timestamp = format_dual_timezone(get_utc3_now())
             
             formatted_message = f"""
 {emoji} <b>System {level}</b>
@@ -293,7 +293,7 @@ class TelegramNotifier:
 
 ✅ Telegram bot connection test successful!
 
-🕐 <i>{format_dual_timezone(convert_to_utc3(datetime.now()))}</i>
+🕐 <i>{format_dual_timezone(get_utc3_now())}</i>
         """.strip()
         
         success = self.send_message(test_message)
