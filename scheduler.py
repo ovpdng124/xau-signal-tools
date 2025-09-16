@@ -356,7 +356,7 @@ class DaemonScheduler:
             # Detect signal ONLY on the latest closed candle (index 3 for proper lookback)
             # Index 0 = N0 (current/incomplete), Index 1 = N1 (latest closed), Index 2 = N2, Index 3 = N3
             # We scan from index 3 to check N1,N2,N3 pattern but only get 1 signal max
-            signals = self.detector.scan_for_signals(df, start_index=3, end_index=3)
+            signals = self.detector.scan_for_signals_with_supertrend(df, start_index=3, end_index=3)
             
             # Should only have max 1 signal since we check only 1 candle position
             if signals:

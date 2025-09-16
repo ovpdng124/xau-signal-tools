@@ -152,8 +152,8 @@ def handle_detect_command(args):
         # Sort data by timestamp DESC for scanning (latest first)
         df = df.sort_values('timestamp', ascending=False).reset_index(drop=True)
         
-        # Detect signals
-        signals = detector.scan_for_signals(df)
+        # Detect signals with SuperTrend confidence
+        signals = detector.scan_for_signals_with_supertrend(df)
         
         if not signals:
             logger.info("No signals detected in the specified period")

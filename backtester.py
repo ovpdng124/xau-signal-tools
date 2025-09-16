@@ -13,7 +13,7 @@ from utils import (
     print_backtest_summary,
     is_within_trading_hours
 )
-from config import ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME, ENABLE_SINGLE_ORDER_MODE
+from config import ENABLE_TIMEOUT, TIMEOUT_HOURS, ENABLE_TIME_WINDOW, TRADE_START_TIME, TRADE_END_TIME, ENABLE_SINGLE_ORDER_MODE, TP_AMOUNT, SL_AMOUNT
 from logger import setup_logger
 
 logger = setup_logger()
@@ -64,6 +64,11 @@ class Backtester:
                 return []
             
             logger.info(f"Loaded {len(df)} {self.timeframe} candles for signal detection")
+            
+            # Calculate SuperTrend for entire dataset
+            from utils import calculate_supertrend
+            self.signal_detector.supertrend_data = calculate_supertrend(df)
+            logger.info("SuperTrend calculated for signal confidence scoring")
             
             # Load 1-minute data for precise TP/SL checking
             df_1m = self.db.load_candles(start_dt, end_dt, '1m')
@@ -177,7 +182,8 @@ class Backtester:
                         'pnl': pnl,
                         'pnl_percentage': pnl_percentage,
                         'result': result,
-                        'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60)
+                        'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60),
+                        'confidence': order.get('confidence', 'N/A')
                     }
                     
                     self.completed_orders.append(completed_order)
@@ -238,7 +244,8 @@ class Backtester:
                         'pnl': pnl,
                         'pnl_percentage': pnl_percentage,
                         'result': result,
-                        'duration_minutes': int((exit_time_precise - order['entry_time']).total_seconds() / 60)
+                        'duration_minutes': int((exit_time_precise - order['entry_time']).total_seconds() / 60),
+                        'confidence': order.get('confidence', 'N/A')
                     }
                     
                     self.completed_orders.append(completed_order)
@@ -323,7 +330,8 @@ class Backtester:
                         'pnl': pnl,
                         'pnl_percentage': pnl_percentage,
                         'result': result,
-                        'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60)
+                        'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60),
+                        'confidence': order.get('confidence', 'N/A')
                     }
                     
                     self.completed_orders.append(completed_order)
@@ -361,7 +369,8 @@ class Backtester:
                     'pnl': pnl,
                     'pnl_percentage': pnl_percentage,
                     'result': result,
-                    'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60)
+                    'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60),
+                    'confidence': order.get('confidence', 'N/A')
                 }
                 
                 self.completed_orders.append(completed_order)
@@ -397,7 +406,8 @@ class Backtester:
             'entry_price': entry_price,
             'tp_price': tp_price,
             'sl_price': sl_price,
-            'signal_details': signal['details']
+            'signal_details': signal['details'],
+            'confidence': signal.get('confidence', 'N/A')
         }
         
         self.active_orders.append(order)
@@ -437,7 +447,8 @@ class Backtester:
                 'pnl': pnl,
                 'pnl_percentage': pnl_percentage,
                 'result': result,
-                'duration_minutes': int((exit_time - order['entry_time']).total_seconds() / 60)
+                'duration_minutes': int((exit_time - order['entry_time']).total_seconds() / 60),
+                'confidence': order.get('confidence', 'N/A')
             }
             
             self.completed_orders.append(completed_order)

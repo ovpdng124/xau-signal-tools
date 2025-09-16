@@ -250,11 +250,19 @@ def calculate_win_rate(results):
 
 def print_backtest_summary(results):
     """Print backtest summary statistics"""
+    from config import TP_AMOUNT, SL_AMOUNT, BACKTEST_START_DATE, BACKTEST_END_DATE
+    
     stats = calculate_win_rate(results)
     
     print("\n" + "="*50)
     print("BACKTEST SUMMARY")
     print("="*50)
+    
+    # Add backtest period and TP/SL info from config
+    print(f"Backtest Time: From {BACKTEST_START_DATE} To {BACKTEST_END_DATE}")
+    print(f"TP/SL: {TP_AMOUNT}/{SL_AMOUNT}")
+    print("-" * 50)
+    
     print(f"Total Trades: {stats['total_trades']}")
     print(f"Wins: {stats['wins']}")
     print(f"Losses: {stats['losses']}")
@@ -429,3 +437,108 @@ def seconds_until_next_market_interval(dt=None):
     dt = dt.astimezone(MT5_TIMEZONE)
     
     return int((next_interval - dt).total_seconds())
+
+def calculate_supertrend(df, atr_period=10, multiplier=3.2):
+    """
+    Calculate SuperTrend indicator - Fixed version matching TradingView
+    
+    Args:
+        df: DataFrame with OHLC data
+        atr_period: int - ATR period (default 10)
+        multiplier: float - ATR multiplier (default 3.0)
+        
+    Returns:
+        dict: SuperTrend values for each candle
+    """
+    import numpy as np
+    
+    df = df.copy()
+    df = df.sort_values('timestamp').reset_index(drop=True)
+    
+    # Calculate True Range
+    df['prev_close'] = df['close'].shift(1)
+    df['tr'] = np.maximum(
+        df['high'] - df['low'],
+        np.maximum(
+            np.abs(df['high'] - df['prev_close']),
+            np.abs(df['low'] - df['prev_close'])
+        )
+    )
+    df['tr'] = df['tr'].fillna(df['high'] - df['low'])
+    
+    # Calculate ATR using SMA (better match than EMA)
+    df['atr'] = df['tr'].rolling(window=atr_period).mean()
+    df['atr'] = df['atr'].fillna(df['tr'])
+    
+    # Calculate HL2 source
+    df['hl2'] = (df['high'] + df['low']) / 2
+    
+    # Calculate basic upper and lower bands
+    df['basic_up'] = df['hl2'] - (multiplier * df['atr'])
+    df['basic_dn'] = df['hl2'] + (multiplier * df['atr'])
+    
+    # Initialize final bands
+    df['up'] = df['basic_up'].copy()
+    df['dn'] = df['basic_dn'].copy()
+    
+    # Initialize trend with downtrend (best result from testing)
+    df['trend'] = -1
+    
+    # Apply Pine Script logic exactly
+    for i in range(1, len(df)):
+        prev_close = df.iloc[i-1]['close']
+        prev_up = df.iloc[i-1]['up'] 
+        prev_dn = df.iloc[i-1]['dn']
+        prev_trend = df.iloc[i-1]['trend']
+        
+        current_basic_up = df.iloc[i]['basic_up']
+        current_basic_dn = df.iloc[i]['basic_dn']
+        current_close = df.iloc[i]['close']
+        
+        # up := close[1] > up1 ? max(up,up1) : up
+        if prev_close > prev_up:
+            final_up = max(current_basic_up, prev_up)
+        else:
+            final_up = current_basic_up
+        df.iloc[i, df.columns.get_loc('up')] = final_up
+        
+        # dn := close[1] < dn1 ? min(dn, dn1) : dn
+        if prev_close < prev_dn:
+            final_dn = min(current_basic_dn, prev_dn)
+        else:
+            final_dn = current_basic_dn
+        df.iloc[i, df.columns.get_loc('dn')] = final_dn
+        
+        # IMPROVED: Check if candle BODY crosses SuperTrend line (not just close)
+        # For trend change, candle body must cross the active SuperTrend line
+        candle_body_top = max(current_close, df.iloc[i]['open'])
+        candle_body_bottom = min(current_close, df.iloc[i]['open'])
+        
+        if prev_trend == -1:  # Currently downtrend, check for uptrend signal
+            # For uptrend signal: candle body must break above the resistance (prev_dn line)
+            # We check if ANY part of body crosses above the line
+            if candle_body_top > prev_dn:  # Body top crosses above lower band
+                new_trend = 1
+            else:
+                new_trend = prev_trend
+        else:  # Currently uptrend, check for downtrend signal  
+            # For downtrend signal: candle body must break below the support (prev_up line)
+            # We check if ANY part of body crosses below the line
+            if candle_body_bottom < prev_up:  # Body bottom crosses below upper band
+                new_trend = -1
+            else:
+                new_trend = prev_trend
+        df.iloc[i, df.columns.get_loc('trend')] = new_trend
+    
+    # Calculate SuperTrend line
+    df['supertrend_line'] = np.where(df['trend'] == 1, df['up'], df['dn'])
+    
+    # Return SuperTrend line values
+    result = {}
+    for i in range(len(df)):
+        result[df.iloc[i]['timestamp']] = {
+            'trend': df.iloc[i]['trend'],
+            'supertrend_line': df.iloc[i]['supertrend_line']
+        }
+    
+    return result

@@ -110,6 +110,7 @@ class TelegramNotifier:
             condition = signal_data.get('condition', 'UNKNOWN')
             entry_price = signal_data.get('entry_price', 0)
             timestamp = signal_data.get('timestamp', get_utc3_now())
+            confidence = signal_data.get('confidence', 'N/A')
             
             # Format timestamp with dual timezone
             if isinstance(timestamp, str):
@@ -133,6 +134,7 @@ class TelegramNotifier:
 🎯 <b>Direction:</b> {display_direction}
 📊 <b>Pattern:</b> {condition}
 💰 <b>Entry Price:</b> ${entry_price:.2f}
+📈 <b>Confidence:</b> {confidence}%
 🕐 <b>Time:</b> {time_str}
             """.strip()
             
@@ -156,6 +158,8 @@ class TelegramNotifier:
             return False
             
         try:
+            from config import TP_AMOUNT, SL_AMOUNT, BACKTEST_START_DATE, BACKTEST_END_DATE
+            
             total_trades = results_summary.get('total_trades', 0)
             wins = results_summary.get('wins', 0)
             losses = results_summary.get('losses', 0)
@@ -166,20 +170,28 @@ class TelegramNotifier:
             avg_loss = results_summary.get('avg_loss', 0)
             
             # Create backtest summary message
-            message = f"""
-📊 <b>XAU/USD Backtest Summary</b>
-
-📈 <b>Performance Overview:</b>
-• Total Trades: {total_trades}
-• Wins: {wins} | Losses: {losses}
-• Win Rate: {win_rate:.2f}%
-
-💰 <b>P&L Analysis:</b>
-• Total PnL: ${total_pnl:.4f}
-• Total PnL%: {total_pnl_percentage:.4f}%
-• Avg Win: ${avg_win:.4f}
-• Avg Loss: ${avg_loss:.4f}
-            """.strip()
+            message_parts = [
+                "📊 <b>XAU/USD Backtest Summary</b>",
+                "",
+                f"🕐 <b>Backtest Time:</b> From {BACKTEST_START_DATE} To {BACKTEST_END_DATE}",
+                f"⚖️ <b>TP/SL:</b> {TP_AMOUNT}/{SL_AMOUNT}",
+                ""
+            ]
+            
+            message_parts.extend([
+                "📈 <b>Performance Overview:</b>",
+                f"• Total Trades: {total_trades}",
+                f"• Wins: {wins} | Losses: {losses}",
+                f"• Win Rate: {win_rate:.2f}%",
+                "",
+                "💰 <b>P&L Analysis:</b>",
+                f"• Total PnL: ${total_pnl:.4f}",
+                f"• Total PnL%: {total_pnl_percentage:.4f}%",
+                f"• Avg Win: ${avg_win:.4f}",
+                f"• Avg Loss: ${avg_loss:.4f}"
+            ])
+            
+            message = "\n".join(message_parts)
             
             return self.send_message(message)
             
