@@ -209,11 +209,11 @@ class DaemonScheduler:
         startup_time = get_utc3_now()
         logger.info(f"Daemon loop started at {format_dual_timezone(startup_time)}")
         
-        # Setup scheduled jobs for market intervals
-        schedule.every().hour.at(":00").do(self._scheduled_crawl)
-        schedule.every().hour.at(":15").do(self._scheduled_crawl) 
-        schedule.every().hour.at(":30").do(self._scheduled_crawl)
-        schedule.every().hour.at(":45").do(self._scheduled_crawl)
+        # Setup scheduled jobs for market intervals with 2-second delay
+        schedule.every().hour.at("00:03").do(self._scheduled_crawl)
+        schedule.every().hour.at("15:03").do(self._scheduled_crawl)
+        schedule.every().hour.at("30:03").do(self._scheduled_crawl)
+        schedule.every().hour.at("45:03").do(self._scheduled_crawl)
         
         # Health check every 30 minutes
         schedule.every(30).minutes.do(self._scheduled_health_check)
@@ -221,7 +221,7 @@ class DaemonScheduler:
         # Status update every 30 seconds (separate from crawl timing)
         schedule.every(30).seconds.do(self._update_daemon_status)
         
-        logger.info("📅 Scheduled jobs: XX:00, XX:15, XX:30, XX:45 for crawling")
+        logger.info("📅 Scheduled jobs: XX:00:02, XX:15:02, XX:30:02, XX:45:02 for crawling")
         
         while self.running:
             try:
