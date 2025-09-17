@@ -22,6 +22,10 @@ BACKTEST_END_DATE = os.getenv("BACKTEST_END_DATE", "2024-12-31 23:59:59")
 TP_AMOUNT = float(os.getenv("TP_AMOUNT", 6.0))
 SL_AMOUNT = float(os.getenv("SL_AMOUNT", 3.0))
 
+# Strong Signal Parameters (when wick crosses SuperTrend line)
+STRONG_SIGNAL_TP = float(os.getenv("STRONG_SIGNAL_TP", 12.0))  # Higher TP for strong signals
+STRONG_SIGNAL_SL_BUFFER = float(os.getenv("STRONG_SIGNAL_SL_BUFFER", 0.5))  # Buffer added to wick low/high
+
 # Default timeframe string for new timeframe system
 DEFAULT_TIMEFRAME = os.getenv("DEFAULT_TIMEFRAME", "15m")
 

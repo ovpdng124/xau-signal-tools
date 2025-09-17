@@ -94,7 +94,7 @@ def main():
         
         # Load data from 2025-09-12 17:00 to 2025-09-16 17:00
         start_date = datetime.strptime("2025-09-12 17:00:00", "%Y-%m-%d %H:%M:%S")
-        end_date = datetime.strptime("2025-09-16 18:30:00", "%Y-%m-%d %H:%M:%S")
+        end_date = datetime.strptime("2025-09-18 18:30:00", "%Y-%m-%d %H:%M:%S")
         
         print(f"Loading 15m data from {start_date} to {end_date}")
         

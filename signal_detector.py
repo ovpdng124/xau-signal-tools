@@ -1,6 +1,6 @@
 import pandas as pd
 from datetime import datetime, timedelta
-from utils import is_green_candle, is_red_candle, get_candle_body_range, get_candle_amplitude_percentage, calculate_supertrend
+from utils import is_green_candle, is_red_candle, get_candle_body_range, get_candle_amplitude_percentage, calculate_supertrend, detect_wick_crossing_and_calculate_strong_sl_tp
 from logger import setup_logger
 
 logger = setup_logger()
@@ -33,35 +33,63 @@ class SignalDetector:
         engulfing_signal = self._check_engulfing_pattern(n2, n3)
         if engulfing_signal and self._check_prerequisite_conditions(n1, n2, n3, 'engulfing'):
             confidence = self._calculate_confidence(engulfing_signal, [n2, n3], 'ENGULFING')
-            return {
+            
+            # Check for wick crossing to determine if this is a strong signal
+            wick_result = detect_wick_crossing_and_calculate_strong_sl_tp(
+                [n2, n3], self.supertrend_data, engulfing_signal, 'ENGULFING'
+            )
+            
+            signal_dict = {
                 'signal_type': engulfing_signal,
                 'condition': 'ENGULFING',
                 'entry_price': n3['close'],  # Entry at N3 close price
                 'timestamp': n3['timestamp'] + timedelta(minutes=15),
                 'confidence': confidence,
+                'is_strong_signal': wick_result['is_strong_signal'],
                 'details': {
                     'engulfing_n1': self._candle_info(n2),  # N2 is N1 for engulfing
                     'engulfing_n2': self._candle_info(n3),  # N3 is N2 for engulfing
                     'entry_candle': self._candle_info(n3)
                 }
             }
+            
+            # Add strong signal data if detected
+            if wick_result['is_strong_signal']:
+                signal_dict['strong_tp_amount'] = wick_result['tp_amount']
+                signal_dict['strong_sl_price'] = wick_result['sl_price']
+                
+            return signal_dict
         
         # Check Condition 2: Inside bar pattern (N1, N2, N3, entry at N3)
         inside_bar_signal = self._check_inside_bar_pattern(n1, n2, n3)
         if inside_bar_signal and self._check_prerequisite_conditions(n1, n2, n3, 'inside_bar'):
             confidence = self._calculate_confidence(inside_bar_signal, [n1, n2, n3], 'INSIDE_BAR')
-            return {
+            
+            # Check for wick crossing to determine if this is a strong signal
+            wick_result = detect_wick_crossing_and_calculate_strong_sl_tp(
+                [n1, n2, n3], self.supertrend_data, inside_bar_signal, 'INSIDE_BAR'
+            )
+            
+            signal_dict = {
                 'signal_type': inside_bar_signal,
                 'condition': 'INSIDE_BAR',
                 'entry_price': n3['close'],  # Entry at N3 close price
                 'timestamp': n3['timestamp'] + timedelta(minutes=15),
                 'confidence': confidence,
+                'is_strong_signal': wick_result['is_strong_signal'],
                 'details': {
                     'inside_n1': self._candle_info(n1),  # N1 for inside bar
                     'inside_n2': self._candle_info(n2),  # N2 for inside bar
                     'inside_n3': self._candle_info(n3),  # N3 for inside bar (entry)
                 }
             }
+            
+            # Add strong signal data if detected
+            if wick_result['is_strong_signal']:
+                signal_dict['strong_tp_amount'] = wick_result['tp_amount']
+                signal_dict['strong_sl_price'] = wick_result['sl_price']
+                
+            return signal_dict
         
         return None
 

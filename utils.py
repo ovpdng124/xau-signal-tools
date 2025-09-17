@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import os
-from config import TP_AMOUNT, SL_AMOUNT
+from config import TP_AMOUNT, SL_AMOUNT, STRONG_SIGNAL_TP, STRONG_SIGNAL_SL_BUFFER
 
 def is_green_candle(candle):
     """Check if candle is green (close > open)"""
@@ -68,6 +68,88 @@ def check_tp_sl_hit(candle, tp_price, sl_price, signal_type):
             return 'SL', sl_price
     
     return None, None
+
+def detect_wick_crossing_and_calculate_strong_sl_tp(candles, supertrend_data, signal_type, pattern_type):
+    """
+    Detect if any candle wicks cross SuperTrend line and calculate strong signal SL/TP
+    
+    Args:
+        candles: list - List of candle dicts (N1, N2, N3 for inside bar or N2, N3 for engulfing)
+        supertrend_data: dict - SuperTrend data indexed by timestamp
+        signal_type: str - 'LONG' or 'SHORT'
+        pattern_type: str - 'INSIDE_BAR' or 'ENGULFING'
+        
+    Returns:
+        dict: {
+            'is_strong_signal': bool,
+            'tp_price': float or None,
+            'sl_price': float or None,
+            'details': str or None
+        }
+    """
+    result = {
+        'is_strong_signal': False,
+        'tp_price': None,
+        'sl_price': None,
+        'details': None
+    }
+    
+    if not candles or not supertrend_data:
+        return result
+    
+    # Check relevant candles based on pattern type
+    if pattern_type == 'INSIDE_BAR':
+        relevant_candles = candles  # N1, N2, N3
+    else:  # ENGULFING
+        relevant_candles = candles[-2:]  # N2, N3 (last 2 candles)
+    
+    wick_crossings = []
+    
+    for candle in relevant_candles:
+        timestamp = candle['timestamp']
+        if timestamp not in supertrend_data:
+            continue
+            
+        st_data = supertrend_data[timestamp]
+        st_line = st_data['supertrend_line']
+        st_trend = st_data['trend']
+        
+        # Check if wick crosses SuperTrend line (not body) with proper trend consideration
+        wick_low = candle['low']
+        wick_high = candle['high']
+        
+        # STRONG SIGNAL logic: Signal direction must ALIGN with SuperTrend trend + wick crossing
+        if signal_type == 'LONG' and st_trend == 1:  # LONG signal in UPTREND
+            # In uptrend, ST line is support below price
+            # Strong signal: lower wick touches/crosses support but price recovers
+            if wick_low < st_line:
+                wick_crossings.append(wick_low)
+        elif signal_type == 'SHORT' and st_trend == -1:  # SHORT signal in DOWNTREND
+            # In downtrend, ST line is resistance above price
+            # Strong signal: upper wick touches/crosses resistance but price rejects
+            if wick_high > st_line:
+                wick_crossings.append(wick_high)
+        # Note: LONG in downtrend or SHORT in uptrend = counter-trend = NOT strong signals
+    
+    if not wick_crossings:
+        return result
+    
+    # Calculate strong signal SL/TP
+    result['is_strong_signal'] = True
+    
+    if signal_type == 'LONG':
+        # For LONG in UPTREND: SL = min(all lower wick prices) - buffer, TP = entry + STRONG_SIGNAL_TP
+        min_wick_low = min(wick_crossings)
+        result['sl_price'] = min_wick_low - STRONG_SIGNAL_SL_BUFFER
+        result['tp_amount'] = STRONG_SIGNAL_TP
+        
+    else:  # SHORT  
+        # For SHORT in DOWNTREND: SL = max(all upper wick prices) + buffer, TP = entry - STRONG_SIGNAL_TP
+        max_wick_high = max(wick_crossings)
+        result['sl_price'] = max_wick_high + STRONG_SIGNAL_SL_BUFFER
+        result['tp_amount'] = STRONG_SIGNAL_TP
+    
+    return result
 
 def calculate_pnl(entry_price, exit_price, signal_type):
     """

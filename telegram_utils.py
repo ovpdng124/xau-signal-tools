@@ -111,6 +111,7 @@ class TelegramNotifier:
             entry_price = signal_data.get('entry_price', 0)
             timestamp = signal_data.get('timestamp', get_utc3_now())
             confidence = signal_data.get('confidence', 'N/A')
+            is_strong_signal = signal_data.get('is_strong_signal', False)
             
             # Format timestamp with dual timezone
             if isinstance(timestamp, str):
@@ -123,20 +124,43 @@ class TelegramNotifier:
             else:
                 time_str = format_dual_timezone(convert_to_utc3(timestamp))
             
-            # Create signal message
-            emoji = "🟢" if signal_type == "LONG" else "🔴"
-            direction_emoji = "📈" if signal_type == "LONG" else "📉"
+            # Calculate SL/TP prices
+            if is_strong_signal:
+                # Use strong signal custom SL/TP
+                tp_amount = signal_data.get('strong_tp_amount', 12.0)
+                sl_price = signal_data.get('strong_sl_price', 0)
+                
+                # Calculate TP price from entry + amount
+                if signal_type == "LONG":
+                    tp_price = entry_price + tp_amount
+                else:  # SHORT
+                    tp_price = entry_price - tp_amount
+                
+                # Strong signal indicator
+                emoji = "🔥🟢" if signal_type == "LONG" else "🔥🔴"
+                direction_emoji = "🚀📈" if signal_type == "LONG" else "🚀📉"
+                signal_strength = "🔥 STRONG SIGNAL 🔥"
+            else:
+                # Use default SL/TP calculation
+                from utils import calculate_tp_sl_prices
+                tp_price, sl_price = calculate_tp_sl_prices(entry_price, signal_type)
+                signal_strength = "Standard Signal"
+            
             display_direction = "BUY" if signal_type == "LONG" else "SELL"
             
             message = f"""
 {emoji} <b>XAU/USD Trading Signal</b> {direction_emoji}
 
+⚡ <b>Signal Strength:</b> {signal_strength}
 🎯 <b>Direction:</b> {display_direction}
 📊 <b>Pattern:</b> {condition}
 💰 <b>Entry Price:</b> ${entry_price:.2f}
+🎯 <b>Take Profit:</b> ${tp_price:.2f}
+🛡️ <b>Stop Loss:</b> ${sl_price:.2f}
 📈 <b>Confidence:</b> {confidence}%
 🕐 <b>Time:</b> {time_str}
             """.strip()
+            
             
             return self.send_message(message)
             
