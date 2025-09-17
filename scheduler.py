@@ -326,9 +326,9 @@ class DaemonScheduler:
         try:
             logger.info("🔍 Performing auto signal detection")
             
-            # Load recent 10 candles for pattern detection (enough for lookback)
+            # Load sufficient historical context for SuperTrend calculation accuracy
             end_time = get_utc3_now().replace(tzinfo=None)
-            start_time = end_time - timedelta(hours=3)  # 3 hours buffer for pattern detection
+            start_time = end_time - timedelta(days=20)  # 2 weeks of historical context for SuperTrend stability
             
             # Convert to string format for database query
             start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -346,16 +346,18 @@ class DaemonScheduler:
                 logger.warning("No recent data found for signal detection")
                 return []
             
-            # Sort by timestamp DESC and limit to recent candles
-            df = df.sort_values('timestamp', ascending=False).head(10).reset_index(drop=True)
+            # Sort by timestamp DESC (latest first) for proper indexing
+            df = df.sort_values('timestamp', ascending=False).reset_index(drop=True)
             
             if len(df) < 4:
                 logger.warning("Not enough candles for signal detection (need at least 4)")
                 return []
             
+            logger.info(f"Loaded {len(df)} candles with historical context for accurate SuperTrend calculation")
+            
             # Detect signal ONLY on the latest closed candle (index 3 for proper lookback)
             # Index 0 = N0 (current/incomplete), Index 1 = N1 (latest closed), Index 2 = N2, Index 3 = N3
-            # We scan from index 3 to check N1,N2,N3 pattern but only get 1 signal max
+            # Use full historical data for SuperTrend calculation but scan only index 3
             signals = self.detector.scan_for_signals_with_supertrend(df, start_index=3, end_index=3)
             
             # Should only have max 1 signal since we check only 1 candle position
