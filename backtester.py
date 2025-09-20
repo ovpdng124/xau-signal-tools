@@ -183,7 +183,7 @@ class Backtester:
                         'pnl_percentage': pnl_percentage,
                         'result': result,
                         'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60),
-                        'confidence': order.get('confidence', 'N/A')
+                        'confidence': order.get('confidence') or 'N/A'
                     }
                     
                     self.completed_orders.append(completed_order)
@@ -245,7 +245,7 @@ class Backtester:
                         'pnl_percentage': pnl_percentage,
                         'result': result,
                         'duration_minutes': int((exit_time_precise - order['entry_time']).total_seconds() / 60),
-                        'confidence': order.get('confidence', 'N/A')
+                        'confidence': order.get('confidence') or 'N/A'
                     }
                     
                     self.completed_orders.append(completed_order)
@@ -331,7 +331,7 @@ class Backtester:
                         'pnl_percentage': pnl_percentage,
                         'result': result,
                         'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60),
-                        'confidence': order.get('confidence', 'N/A')
+                        'confidence': order.get('confidence') or 'N/A'
                     }
                     
                     self.completed_orders.append(completed_order)
@@ -370,7 +370,7 @@ class Backtester:
                     'pnl_percentage': pnl_percentage,
                     'result': result,
                     'duration_minutes': int((current_time - order['entry_time']).total_seconds() / 60),
-                    'confidence': order.get('confidence', 'N/A')
+                    'confidence': order.get('confidence') or 'N/A'
                 }
                 
                 self.completed_orders.append(completed_order)
@@ -407,7 +407,7 @@ class Backtester:
             'tp_price': tp_price,
             'sl_price': sl_price,
             'signal_details': signal['details'],
-            'confidence': signal.get('confidence', 'N/A')
+            'confidence': signal.get('confidence') or 'N/A'
         }
         
         self.active_orders.append(order)
